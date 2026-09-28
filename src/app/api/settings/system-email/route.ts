@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { audit } from "@/lib/audit";
 import { getCompanyProfile } from "@/lib/company";
-import { decrypt, encrypt } from "@/lib/crypto";
+import { encrypt, tryDecrypt } from "@/lib/crypto";
 import { verifySmtp } from "@/lib/integrations/mail";
 import { IntegrationError } from "@/lib/integrations/oauth";
 import { prisma } from "@/lib/prisma";
@@ -56,7 +56,8 @@ export async function PATCH(req: Request) {
         const secure = impliedSecure(s.port, s.secure);
         // Check the login now so a wrong host / password is reported here, not on the first invitation.
         const existing = await prisma.companyProfile.findUnique({ where: { id: 1 }, select: { smtpPass: true } });
-        const pass = s.pass || (existing?.smtpPass ? decrypt(existing.smtpPass) : null);
+        const pass = s.pass || tryDecrypt(existing?.smtpPass);
+        if (!s.pass && existing?.smtpPass && !pass) throw new HttpError(400, "The saved password can't be read on this deployment — enter the password again");
         if (s.user && pass) {
           try {
             await verifySmtp({ host: s.host, port: s.port, secure, user: s.user, pass });

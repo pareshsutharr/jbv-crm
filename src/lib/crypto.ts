@@ -15,6 +15,16 @@ export function encrypt(plain: string) {
   return Buffer.concat([iv, cipher.getAuthTag(), data]).toString("base64url");
 }
 
+/** decrypt() that returns null instead of throwing (e.g. a value written under a different TOKEN_ENCRYPTION_KEY). */
+export function tryDecrypt(token: string | null | undefined) {
+  if (!token) return null;
+  try {
+    return decrypt(token);
+  } catch {
+    return null;
+  }
+}
+
 export function decrypt(token: string) {
   const buf = Buffer.from(token, "base64url");
   const decipher = createDecipheriv("aes-256-gcm", key(), buf.subarray(0, 12));

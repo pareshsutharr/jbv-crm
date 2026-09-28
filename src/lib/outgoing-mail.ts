@@ -35,6 +35,7 @@ export async function sendAsUser(user: { name: string; email: string }, e: Outgo
   }
   const smtp = await smtpSettings();
   if (!smtp) throw new IntegrationError(FIRM_MAILBOX_MISSING);
+  if (smtp.passwordUnreadable) throw new IntegrationError("The firm mailbox's saved password can't be read on this deployment — an administrator needs to re-enter it under Settings → Firm email.");
   try {
     const transport = nodemailer.createTransport({
       host: smtp.host,

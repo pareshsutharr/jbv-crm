@@ -8,7 +8,7 @@ import { impliedSecure, SMTP_PRESETS, smtpPresetByHost, smtpPresetById } from "@
 
 type Admin = { id: string; name: string; email: string; mailboxes: string[] };
 type Sender = { userId: string | null; method: string | null; fromEmail: string | null; summary: string };
-export type SmtpView = { host: string; port: number; user: string | null; from: string; secure: boolean; source: "settings" | "env"; hasPassword: boolean } | null;
+export type SmtpView = { host: string; port: number; user: string | null; from: string; secure: boolean; source: "settings" | "env"; hasPassword: boolean; passwordUnreadable?: boolean } | null;
 
 const METHOD: Record<string, string> = { GOOGLE: "Gmail", MICROSOFT: "Outlook", SMTP: "SMTP" };
 
@@ -154,8 +154,8 @@ export function SystemEmailCard({ sender, admins, smtp, currentUserId }: { sende
             </Field>
           </div>
           <div className="col-span-3">
-            <Field label="Password / app password" htmlFor="smtp-pass" hint={stored?.hasPassword ? "Leave blank to keep the saved password." : undefined}>
-              <Input id="smtp-pass" name="pass" type="password" placeholder={stored?.hasPassword ? "••••••••••••" : ""} autoComplete="new-password" />
+            <Field label="Password / app password" htmlFor="smtp-pass" hint={stored?.passwordUnreadable ? "The saved password can't be read on this deployment — enter it again." : stored?.hasPassword ? "Leave blank to keep the saved password." : undefined}>
+              <Input id="smtp-pass" name="pass" type="password" placeholder={stored?.hasPassword && !stored.passwordUnreadable ? "••••••••••••" : ""} autoComplete="new-password" required={!!stored?.passwordUnreadable} />
             </Field>
           </div>
           <div className="col-span-4">

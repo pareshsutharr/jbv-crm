@@ -49,7 +49,7 @@ export default async function SettingsPage() {
           <SystemEmailCard
             sender={{ userId: profileRow?.systemSenderUserId ?? null, method: sender.method, fromEmail: sender.fromEmail, summary: sender.summary }}
             admins={admins.map((a) => ({ id: a.id, name: a.name, email: a.email, mailboxes: a.connectedAccounts.map((c) => PROVIDER_LABELS[c.provider].split(" ")[0]) }))}
-            smtp={smtp ? { host: smtp.host, port: smtp.port, user: smtp.user, from: smtp.from, secure: smtp.secure, source: smtp.source, hasPassword: !!smtp.pass } : null}
+            smtp={smtp ? { host: smtp.host, port: smtp.port, user: smtp.user, from: smtp.from, secure: smtp.secure, source: smtp.source, hasPassword: !!smtp.pass || !!smtp.passwordUnreadable, passwordUnreadable: smtp.passwordUnreadable } : null}
             currentUserId={me.id}
           />
         </Card>

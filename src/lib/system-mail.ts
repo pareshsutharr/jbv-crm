@@ -1,6 +1,6 @@
 import type { ConnectedAccount, IntegrationProvider } from "@prisma/client";
 import nodemailer from "nodemailer";
-import { decrypt } from "@/lib/crypto";
+import { tryDecrypt } from "@/lib/crypto";
 import { PROVIDER_LABELS } from "@/lib/integrations/config";
 import { sendMail } from "@/lib/integrations/mail";
 import { IntegrationError } from "@/lib/integrations/oauth";
@@ -28,6 +28,8 @@ export type SmtpSettings = {
   secure: boolean;
   /** Where the values came from. */
   source: "settings" | "env";
+  /** A password is stored but can't be decrypted on this deployment (encryption key changed): it must be re-entered. */
+  passwordUnreadable?: boolean;
 };
 
 const smtpSelect = { smtpHost: true, smtpPort: true, smtpUser: true, smtpPass: true, smtpFrom: true, smtpSecure: true } as const;
@@ -50,7 +52,8 @@ export async function smtpSettings(row?: SmtpRow | null): Promise<SmtpSettings |
   if (p?.smtpHost) {
     const from = p.smtpFrom || p.smtpUser;
     if (from) {
-      return { host: p.smtpHost, port: p.smtpPort ?? 587, user: p.smtpUser, pass: p.smtpPass ? decrypt(p.smtpPass) : null, from, secure: p.smtpSecure, source: "settings" };
+      const pass = tryDecrypt(p.smtpPass);
+      return { host: p.smtpHost, port: p.smtpPort ?? 587, user: p.smtpUser, pass, from, secure: p.smtpSecure, source: "settings", passwordUnreadable: !!p.smtpPass && !pass };
     }
   }
   return smtpFromEnv();
@@ -60,7 +63,7 @@ export type SystemSender = {
   user: { id: string; name: string; email: string } | null;
   account: ConnectedAccount | null;
   /** SMTP without the password, for display. */
-  smtp: { host: string; port: number; user: string | null; from: string; secure: boolean; source: "settings" | "env" } | null;
+  smtp: { host: string; port: number; user: string | null; from: string; secure: boolean; source: "settings" | "env"; passwordUnreadable?: boolean } | null;
   /** How a system email would go out right now; null = not set up. */
   method: SystemMailVia | null;
   fromEmail: string | null;
@@ -76,13 +79,15 @@ export async function systemSender(): Promise<SystemSender> {
   if (!user) user = await prisma.user.findFirst({ where: { role: "ADMIN", active: true }, orderBy: { createdAt: "asc" }, include });
   const account = user?.connectedAccounts[0] ?? null;
   const smtpFull = await smtpSettings(profile ?? null);
-  const smtp = smtpFull ? { host: smtpFull.host, port: smtpFull.port, user: smtpFull.user, from: smtpFull.from, secure: smtpFull.secure, source: smtpFull.source } : null;
+  const smtp = smtpFull ? { host: smtpFull.host, port: smtpFull.port, user: smtpFull.user, from: smtpFull.from, secure: smtpFull.secure, source: smtpFull.source, passwordUnreadable: smtpFull.passwordUnreadable } : null;
   const method: SystemMailVia | null = account ? account.provider : smtp ? "SMTP" : null;
   const fromEmail = account?.email ?? smtp?.from ?? profile?.email ?? user?.email ?? null;
   const summary = account
     ? `Sends from ${account.email} through ${user!.name}'s connected ${PROVIDER_LABELS[account.provider]} account.`
-    : smtp
-      ? `Sends from ${smtp.from} through SMTP (${smtp.host}${smtp.source === "env" ? ", from the server environment" : ""}).`
+    : smtp?.passwordUnreadable
+      ? `SMTP (${smtp.host}) is configured but its saved password can't be read on this deployment — re-enter the password below and save.`
+      : smtp
+        ? `Sends from ${smtp.from} through SMTP (${smtp.host}${smtp.source === "env" ? ", from the server environment" : ""}).`
       : user
         ? `Not set up yet: ${user.name} (${user.email}) needs to connect Google or Microsoft under My account, or enter SMTP settings below. Until then, invitation links are shared by hand.`
         : "Not set up yet: no active administrator. Enter SMTP settings below or connect an admin's mailbox.";
@@ -110,6 +115,7 @@ export async function sendSystemEmail(e: { to: string[]; subject: string; body: 
     }
   }
   const smtp = await smtpSettings();
+  if (smtp?.passwordUnreadable) return { sent: false, reason: `The saved SMTP password can't be read on this deployment — re-enter it under Settings → Firm email.` };
   if (smtp) {
     try {
       const transport = nodemailer.createTransport({

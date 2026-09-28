@@ -2,7 +2,7 @@ import type { Prisma, Role } from "@prisma/client";
 import { createHash, randomBytes } from "node:crypto";
 import { z } from "zod";
 import { getCompanyProfile } from "@/lib/company";
-import { decrypt, encrypt } from "@/lib/crypto";
+import { decrypt, encrypt, tryDecrypt } from "@/lib/crypto";
 import { appUrl } from "@/lib/integrations/config";
 import { ROLE_LABELS } from "@/lib/labels";
 import { prisma } from "@/lib/prisma";
@@ -60,7 +60,7 @@ export function toInvitationRow(i: Row) {
     phone: i.phone,
     role: i.role,
     status,
-    inviteUrl: status === "pending" ? inviteUrl(decrypt(i.tokenEncrypted)) : null,
+    inviteUrl: status === "pending" ? (tryDecrypt(i.tokenEncrypted) ? inviteUrl(decrypt(i.tokenEncrypted)) : null) : null,
     expiresAt: i.expiresAt.toISOString(),
     sentAt: i.sentAt?.toISOString() ?? null,
     sentVia: i.sentVia,

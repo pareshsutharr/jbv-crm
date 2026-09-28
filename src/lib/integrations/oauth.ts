@@ -1,5 +1,5 @@
 import type { ConnectedAccount, IntegrationProvider } from "@prisma/client";
-import { decrypt, encrypt } from "@/lib/crypto";
+import { encrypt, tryDecrypt } from "@/lib/crypto";
 import { prisma } from "@/lib/prisma";
 import { GOOGLE, MICROSOFT, redirectUri } from "./config";
 
@@ -81,11 +81,16 @@ export async function connectAccount(userId: string, provider: IntegrationProvid
 
 /** A valid access token for the account, refreshing it when it's about to expire. */
 export async function accessTokenFor(account: ConnectedAccount) {
-  if (!account.expiresAt || account.expiresAt.getTime() > Date.now() + 60_000) return decrypt(account.accessToken);
-  if (!account.refreshToken) throw new IntegrationError("The connection has expired — reconnect the account");
+  if (!account.expiresAt || account.expiresAt.getTime() > Date.now() + 60_000) {
+    const token = tryDecrypt(account.accessToken);
+    if (!token) throw new IntegrationError("The stored connection can't be read on this deployment — reconnect the account");
+    return token;
+  }
+  const refresh = tryDecrypt(account.refreshToken);
+  if (!refresh) throw new IntegrationError("The connection has expired — reconnect the account");
   const tokens = await tokenRequest(account.provider, {
     grant_type: "refresh_token",
-    refresh_token: decrypt(account.refreshToken),
+    refresh_token: refresh,
     ...(account.provider === "MICROSOFT" ? { scope: MICROSOFT.scopes.join(" ") } : {}),
   });
   await prisma.connectedAccount.update({
