@@ -11,14 +11,18 @@ export const GOOGLE = {
   tokenUrl: () => process.env.GOOGLE_TOKEN_URL ?? "https://oauth2.googleapis.com/token",
   apiUrl: () => process.env.GOOGLE_API_URL ?? "https://www.googleapis.com",
   gmailUrl: () => process.env.GOOGLE_GMAIL_URL ?? "https://gmail.googleapis.com",
-  scopes: [
-    "openid",
-    "email",
-    "https://www.googleapis.com/auth/calendar.events",
-    "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/gmail.send",
-  ],
+  /**
+   * Calendar (Google Meet links + invites) by default. The Gmail scopes are
+   * "restricted" and need Google's verification + security assessment, so
+   * they are requested only when GOOGLE_GMAIL_SYNC=on (email is sent from the
+   * firm mailbox anyway; this only adds capturing replies from Gmail).
+   */
+  get scopes() {
+    return ["openid", "email", "https://www.googleapis.com/auth/calendar.events", ...(gmailSyncEnabled() ? ["https://www.googleapis.com/auth/gmail.readonly", "https://www.googleapis.com/auth/gmail.send"] : [])];
+  },
 };
+
+export const gmailSyncEnabled = () => process.env.GOOGLE_GMAIL_SYNC === "on";
 
 export const MICROSOFT = {
   clientId: () => process.env.MICROSOFT_CLIENT_ID,

@@ -27,7 +27,7 @@ type ContactOption = { name: string; email: string | null; phone?: string | null
 type Parent = { leadId?: string; clientId?: string };
 /** The signed-in user's own channels (from My account). */
 type Me = { whatsapp: string | null; meetingLink: string | null; whatsappLinked?: boolean };
-type Connected = { google: boolean; microsoft: boolean; firmMailbox?: boolean };
+type Connected = { google: boolean; microsoft: boolean; firmMailbox?: boolean; /** The firm's connected calendar (system sender), usable by everyone. */ firmCalendar?: "GOOGLE" | "MICROSOFT" | null };
 
 function nextSlot() {
   const d = new Date();
@@ -287,13 +287,16 @@ function ScheduleModal({
   onClose: () => void;
 }) {
   const router = useRouter();
-  const [provider, setProvider] = useState<MeetingProvider>(connected.google ? "GOOGLE_MEET" : connected.microsoft ? "TEAMS" : "ZOOM");
+  const hasGoogle = connected.google || connected.firmCalendar === "GOOGLE";
+  const hasMicrosoft = connected.microsoft || connected.firmCalendar === "MICROSOFT";
+  const viaFirm = !connected.google && !connected.microsoft && !!connected.firmCalendar;
+  const [provider, setProvider] = useState<MeetingProvider>(hasGoogle ? "GOOGLE_MEET" : hasMicrosoft ? "TEAMS" : "ZOOM");
   const reachable = contacts.filter((c) => c.email || c.phone);
   const [selected, setSelected] = useState<Set<string>>(new Set(reachable.slice(0, 1).map(contactKey)));
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [created, setCreated] = useState<MeetingRow | null>(null);
-  const autoLink = (provider === "GOOGLE_MEET" && connected.google) || (provider === "TEAMS" && connected.microsoft);
+  const autoLink = (provider === "GOOGLE_MEET" && hasGoogle) || (provider === "TEAMS" && hasMicrosoft);
   const needsLink = provider === "ZOOM" || provider === "OTHER" || ((provider === "GOOGLE_MEET" || provider === "TEAMS") && !autoLink);
 
   async function submit(e: React.FormEvent<HTMLFormElement>) {
@@ -349,7 +352,7 @@ function ScheduleModal({
                 <CalendarCheck size={11} /> Calendar invite emailed to attendees with an email address.
               </p>
             )}
-            {!created.inCalendar && !connected.google && !connected.microsoft && !connected.firmMailbox && (
+            {!created.inCalendar && !hasGoogle && !hasMicrosoft && !connected.firmMailbox && (
               <p className="mt-1 text-xs text-gray-500">Calendar invitations are emailed automatically once an administrator sets up the firm mailbox under Settings → System email.</p>
             )}
           </div>
@@ -410,9 +413,9 @@ function ScheduleModal({
             htmlFor="mt-provider"
             hint={
               autoLink
-                ? `A ${provider === "TEAMS" ? "Teams" : "Meet"} link is created in your calendar and invites are emailed to attendees.`
+                ? `A ${provider === "TEAMS" ? "Teams" : "Meet"} link is created in ${viaFirm ? "the firm's" : "your"} calendar and invites are emailed to attendees${viaFirm ? " (and to you)" : ""}.`
                 : provider === "GOOGLE_MEET" || provider === "TEAMS"
-                  ? `Connect your ${provider === "TEAMS" ? "Microsoft" : "Google"} account under My account to create links automatically, or paste one below.`
+                  ? `To create links automatically, connect your ${provider === "TEAMS" ? "Microsoft" : "Google"} account under My account (or ask an administrator to connect the firm's), or paste one below.`
                   : needsLink && me.meetingLink
                     ? "Prefilled with your personal meeting link from My account."
                     : undefined
@@ -480,10 +483,10 @@ function ScheduleModal({
             <Textarea id="mt-agenda" name="agenda" rows={2} />
           </Field>
         </div>
-        {(connected.google || connected.microsoft || connected.firmMailbox) && (
+        {(hasGoogle || hasMicrosoft || connected.firmMailbox) && (
           <label className="col-span-6 flex items-center gap-2 text-sm text-gray-700">
             <input type="checkbox" name="addToCalendar" defaultChecked className="rounded border-gray-300" />{" "}
-            {connected.google || connected.microsoft ? "Add to my calendar and email invites" : "Email invitations from the firm mailbox as me (calendar file attached)"}
+            {connected.google || connected.microsoft ? "Add to my calendar and email invites" : viaFirm ? "Add to the firm's calendar and email invites" : "Email invitations from the firm mailbox as me (calendar file attached)"}
           </label>
         )}
       </form>

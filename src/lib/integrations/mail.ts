@@ -193,6 +193,7 @@ function smtpConfigOf(account: ConnectedAccount): SmtpAccountConfig {
 
 export function listMessagesSince(account: ConnectedAccount, since: Date): Promise<NormalizedMessage[]> {
   if (account.provider === "SMTP") return Promise.resolve([]); // sending only
+  if (account.provider === "GOOGLE" && account.scopes && !/gmail/.test(account.scopes)) return Promise.resolve([]); // calendar-only connection
   return account.provider === "GOOGLE" ? listGmail(account, since) : listGraph(account, since);
 }
 

@@ -133,7 +133,7 @@ test("guards: no calendar → needs a link; tampered OAuth state; disconnect; cr
   const start = new Date(Date.now() + 86_400_000).toISOString();
   const noAccount = await co.request.post("/api/meetings", { data: { clientId: id, title: "KYC walkthrough", startAt: start, provider: "GOOGLE_MEET" } });
   expect(noAccount.status()).toBe(400);
-  expect((await noAccount.json()).error).toMatch(/Connect your Google account/);
+  expect((await noAccount.json()).error).toMatch(/connect your Google account/i);
   const zoom = await co.request.post("/api/meetings", { data: { clientId: id, title: "KYC walkthrough", startAt: start, provider: "ZOOM", joinUrl: "https://zoom.us/j/123" } });
   expect(zoom.status()).toBe(201);
   expect((await co.request.post("/api/emails", { data: { clientId: id, to: ["hitesh@patelprecision.co.in"], subject: "x", body: "y" } })).status()).toBe(400);

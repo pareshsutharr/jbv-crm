@@ -67,12 +67,15 @@ The CRM itself never needs a Supabase *access token* (`sbp_…`), only these con
 - `STORAGE_DRIVER=local` (default): files are stored in `UPLOAD_DIR`. Back that folder up.
 - `STORAGE_DRIVER=supabase`: a private Supabase Storage bucket. Set `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (server only) and `SUPABASE_BUCKET`, and create the bucket as **private**. Files are only served through the CRM's permission-checked download routes. Use this on serverless hosts.
 
-### Google (Gmail + Calendar/Meet)
+### Google (Calendar / Meet, optionally Gmail)
 
-1. In Google Cloud Console, create a project and enable the **Gmail API** and **Google Calendar API**.
-2. Set up the OAuth consent screen. If you use Google Workspace, choose **Internal**: no Google verification is needed. `gmail.readonly` is a *restricted* scope, and external apps need Google's security review.
-3. Create OAuth credentials of type *Web application*, with redirect URI `https://<your-crm>/api/integrations/google/callback`.
-4. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
+By default the CRM asks Google only for **calendar access** (`calendar.events` + email): enough for Google Meet links and calendar invites, and a "sensitive" rather than "restricted" scope, so no security assessment is needed. Set `GOOGLE_GMAIL_SYNC=on` to also request the restricted Gmail scopes (capturing replies), which requires Google's verification.
+
+1. In Google Cloud Console, create a project and enable the **Google Calendar API** (Library). Add the **Gmail API** only with `GOOGLE_GMAIL_SYNC=on`.
+2. OAuth consent screen: External (or Internal on Google Workspace), app name, support email, scopes `…/auth/calendar.events`, `openid`, `email`. Publish it ("In production") so refresh tokens don't expire after 7 days as they do in Testing mode; the "unverified app" warning can be clicked through until verification.
+3. Credentials → Create credentials → **OAuth client ID** → *Web application*, authorised redirect URIs `https://<your-crm>/api/integrations/google/callback` (and `http://localhost:3000/api/integrations/google/callback` for local use).
+4. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` (Vercel → Environment Variables, then redeploy).
+5. The administrator who owns the firm mailbox connects the firm's Google account under **My account**. From then on **every user** gets Google Meet links and calendar invites (created in the firm's calendar, with the scheduling user invited too); anyone can still connect their own account instead.
 
 ### Microsoft (Outlook + Teams)
 

@@ -2,7 +2,7 @@ import { Card, PageBody, PageHeader } from "@/components/layout";
 import { Badge } from "@/components/ui";
 import type { SearchParams } from "@/lib/filters";
 import { formatDateTime } from "@/lib/format";
-import { PROVIDER_LABELS, providerConfigured } from "@/lib/integrations/config";
+import { gmailSyncEnabled, PROVIDER_LABELS, providerConfigured } from "@/lib/integrations/config";
 import { ROLE_LABELS } from "@/lib/labels";
 import { prisma } from "@/lib/prisma";
 import { requirePageUser } from "@/lib/session";
@@ -12,10 +12,12 @@ import { IntegrationActions } from "./integration-actions";
 import { ProfileForm } from "./profile-form";
 
 const PROVIDERS = ["GOOGLE", "MICROSOFT"] as const;
-const WHAT: Record<(typeof PROVIDERS)[number], string> = {
-  GOOGLE: "Create Google Meet invites from the CRM, and capture Gmail conversations with your leads and clients.",
+const WHAT = (): Record<(typeof PROVIDERS)[number], string> => ({
+  GOOGLE: gmailSyncEnabled()
+    ? "Create Google Meet invites from the CRM, and capture Gmail conversations with your leads and clients."
+    : "Create Google Meet links and calendar invites from the CRM. When an administrator (the firm mailbox owner) connects the firm's Google account here, everyone can create Meet links.",
   MICROSOFT: "Create Microsoft Teams invites from the CRM, and capture Outlook conversations with your leads and clients.",
-};
+});
 
 export default async function AccountPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requirePageUser();
@@ -67,7 +69,7 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
                     <p className="flex items-center gap-2 text-sm font-medium text-gray-900">
                       {PROVIDER_LABELS[p]} {a ? <Badge tone="green">Connected</Badge> : <Badge>Not connected</Badge>}
                     </p>
-                    <p className="mt-0.5 text-xs text-gray-500">{WHAT[p]}</p>
+                    <p className="mt-0.5 text-xs text-gray-500">{WHAT()[p]}</p>
                     {a && (
                       <p className="mt-1 text-xs text-gray-600">
                         {a.email} · last email sync {a.lastSyncAt ? formatDateTime(a.lastSyncAt) : "never"}

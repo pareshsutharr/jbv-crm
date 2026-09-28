@@ -5,6 +5,7 @@ import { cancelCalendarEvent } from "@/lib/integrations/calendar";
 import { emailMeetingInvitation } from "@/lib/meeting-mail";
 import { loadMeetingForUser, type MeetingAttendee, meetingInclude, meetingUpdateSchema, toMeetingRow } from "@/lib/meetings";
 import { firmMailbox, recordSentEmail } from "@/lib/outgoing-mail";
+import { systemSender } from "@/lib/system-mail";
 import { prisma } from "@/lib/prisma";
 import { handle, HttpError, requireApiUser } from "@/lib/session";
 
@@ -30,7 +31,12 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
           cancellation = await emailMeetingInvitation(user, toMeetingRow(m, user), attendees, { uid: m.externalEventId, firmName: firm.firmName, method: "CANCEL", reason: input.reason, from: mailbox.from }).catch(() => null);
         }
       } else if (m.externalEventId && m.externalProvider) {
-        const account = await prisma.connectedAccount.findUnique({ where: { userId_provider: { userId: m.organizerId, provider: m.externalProvider } } });
+        // The organiser's own calendar, or the firm's account that created the event on their behalf.
+        let account = await prisma.connectedAccount.findUnique({ where: { userId_provider: { userId: m.organizerId, provider: m.externalProvider } } });
+        if (!account) {
+          const sender = await systemSender();
+          if (sender.account?.provider === m.externalProvider) account = sender.account;
+        }
         if (account) await cancelCalendarEvent(account, m.externalEventId, input.reason ?? undefined).catch(() => undefined);
       }
       const updated = await prisma.$transaction(async (tx) => {

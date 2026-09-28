@@ -8,6 +8,7 @@ import { createCalendarEvent } from "@/lib/integrations/calendar";
 import { IntegrationError } from "@/lib/integrations/oauth";
 import { emailMeetingInvitation } from "@/lib/meeting-mail";
 import { firmMailbox, recordSentEmail, type SentMail } from "@/lib/outgoing-mail";
+import { systemSender } from "@/lib/system-mail";
 import { MEETING_PROVIDER_LABELS, meetingCreateSchema, meetingInclude, REQUIRED_ACCOUNT, toMeetingRow } from "@/lib/meetings";
 import { prisma } from "@/lib/prisma";
 import { handle, HttpError, requireApiUser } from "@/lib/session";
@@ -49,8 +50,18 @@ export async function POST(req: Request) {
     const calendars = await prisma.connectedAccount.findMany({ where: { userId: user.id, provider: { in: ["GOOGLE", "MICROSOFT"] } }, orderBy: { createdAt: "asc" } });
     const needed = REQUIRED_ACCOUNT[input.provider];
     let account = needed ? calendars.find((a) => a.provider === needed) : calendars[0];
+    // No calendar of their own: the firm's connected Google / Microsoft account (the system sender's) creates the event for anyone.
+    let firmCalendar = false;
+    if (!account) {
+      const sender = await systemSender();
+      const firmAccount = sender.account && sender.account.provider !== "SMTP" && (!needed || sender.account.provider === needed) ? sender.account : null;
+      if (firmAccount) {
+        account = firmAccount;
+        firmCalendar = true;
+      }
+    }
     if (needed && !account && !input.joinUrl) {
-      throw new HttpError(400, `Connect your ${needed === "GOOGLE" ? "Google" : "Microsoft"} account under My account to create ${MEETING_PROVIDER_LABELS[input.provider]} links, or paste a link.`);
+      throw new HttpError(400, `To create ${MEETING_PROVIDER_LABELS[input.provider]} links, connect your ${needed === "GOOGLE" ? "Google" : "Microsoft"} account under My account (or an administrator connects the firm's), or paste a link.`);
     }
     if (!input.addToCalendar) account = undefined;
 
@@ -65,7 +76,8 @@ export async function POST(req: Request) {
           agenda: [input.agenda, joinUrl && !needed ? `Join: ${joinUrl}` : null].filter(Boolean).join("\n\n") || null,
           startAt: input.startAt,
           endAt,
-          attendees: emailAttendees,
+          // From the firm's calendar, the scheduling user is invited too so it lands in their own calendar.
+          attendees: firmCalendar ? [...emailAttendees, { email: user.email, name: user.name }] : emailAttendees,
           location: input.location,
           online: !!needed && !input.joinUrl,
         });
