@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
+import { alertNewWebsiteLead } from "@/lib/staff-alerts";
 import { allowedOrigin, ingestWebsiteLead, rateLimited, validApiKey, websiteLeadSchema } from "@/lib/website-leads";
+
+export const maxDuration = 30; // staff WhatsApp alerts go out before answering
 
 /**
  * Public endpoint for beipoready.com forms (no CRM session).
@@ -37,5 +40,7 @@ export async function POST(req: Request) {
   if (input.website) return NextResponse.json({ ok: true }, { status: 202, headers });
 
   const { lead, deduplicated } = await ingestWebsiteLead(input);
+  // WhatsApp alert to the assigned RM and admins (firm WhatsApp, else CallMeBot). Never fails the request.
+  if (!deduplicated) await Promise.race([alertNewWebsiteLead(lead.id), new Promise((r) => setTimeout(r, 20_000))]).catch((err) => console.warn("Lead alert failed:", err));
   return NextResponse.json({ ok: true, leadId: lead.id, deduplicated }, { status: deduplicated ? 200 : 201, headers });
 }

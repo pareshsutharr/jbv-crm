@@ -26,6 +26,8 @@ import { endOfZonedDay } from "../src/lib/tz";
 
 const prisma = new PrismaClient();
 const PASSWORD = "Password@123";
+const ADMIN_EMAIL = "admin@beipoready.com";
+const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? "beipoready@123456";
 const UPLOAD_DIR = path.resolve(process.env.UPLOAD_DIR ?? "./uploads");
 
 /** A tiny one-page PDF so seeded documents can be opened. */
@@ -127,11 +129,14 @@ async function main() {
 
   // ─── Users ─────────────────────────────────────────────────────────────
   const passwordHash = await bcrypt.hash(PASSWORD, 12);
-  const mkUser = (name: string, email: string, role: Role, active = true) => prisma.user.create({ data: { name, email, role, active, passwordHash } });
-  const admin = await mkUser("Aarti Mehta", "admin@beipoready.com", "ADMIN");
-  const compliance = await mkUser("Vikram Rao", "compliance@beipoready.com", "COMPLIANCE");
-  const rm1 = await mkUser("Rohan Sharma", "rohan@beipoready.com", "RM");
-  const rm2 = await mkUser("Priya Nair", "priya@beipoready.com", "RM");
+  const seededAt = new Date();
+  const mkUser = (name: string, email: string, role: Role, active = true, extra: { designation?: string; passwordHash?: string } = {}) =>
+    prisma.user.create({ data: { name, email, role, active, passwordHash: extra.passwordHash ?? passwordHash, designation: extra.designation ?? null, onboardedAt: seededAt } });
+  // The administrator account doubles as the system mailbox (invitations are sent from it once it's connected under My account).
+  const admin = await mkUser("Rakesh Doshi", ADMIN_EMAIL, "ADMIN", true, { designation: "CEO", passwordHash: await bcrypt.hash(ADMIN_PASSWORD, 12) });
+  const compliance = await mkUser("Vikram Rao", "compliance@beipoready.com", "COMPLIANCE", true, { designation: "Compliance Officer" });
+  const rm1 = await mkUser("Rohan Sharma", "rohan@beipoready.com", "RM", true, { designation: "Relationship Manager" });
+  const rm2 = await mkUser("Priya Nair", "priya@beipoready.com", "RM", true, { designation: "Relationship Manager" });
   await mkUser("Kabir Singh", "viewer@beipoready.com", "VIEWER");
   await mkUser("Neha Gupta", "neha@beipoready.com", "VIEWER", false); // pending self-signup
   const rmOf = { rm1, rm2 };
@@ -464,19 +469,36 @@ async function main() {
     data: [
       { userId: compliance.id, type: "KYC_STATUS", title: "KYC submitted: Patel Precision Engineering Pvt Ltd", body: "Pending → Submitted by Rohan Sharma", link: `/clients/${clients["Patel Precision Engineering Pvt Ltd"].id}`, createdAt: daysAgo(14) },
       { userId: rm1.id, type: "MANDATE_STAGE", title: "New mandate assigned: Growth capital – ₹18 Cr private placement", body: "Patel Precision Engineering Pvt Ltd", link: `/mandates/${mandates["Patel Precision Engineering Pvt Ltd|FUND_RAISING"]}`, createdAt: daysAgo(55), readAt: daysAgo(54) },
-      { userId: rm1.id, type: "LEAD_ASSIGNED", title: "New lead assigned: Vardhaman Polymers Pvt Ltd", body: "Assigned by Aarti Mehta", link: `/leads/${vardhaman.id}`, createdAt: daysAgo(1) },
-      { userId: rm2.id, type: "LEAD_ASSIGNED", title: "New lead assigned: Menon Healthcare Services Pvt Ltd", body: "Assigned by Aarti Mehta", link: `/leads/${(await leadByCompany("Menon Healthcare Services Pvt Ltd")).id}`, createdAt: daysAgo(3) },
+      { userId: rm1.id, type: "LEAD_ASSIGNED", title: "New lead assigned: Vardhaman Polymers Pvt Ltd", body: "Assigned by Rakesh Doshi", link: `/leads/${vardhaman.id}`, createdAt: daysAgo(1) },
+      { userId: rm2.id, type: "LEAD_ASSIGNED", title: "New lead assigned: Menon Healthcare Services Pvt Ltd", body: "Assigned by Rakesh Doshi", link: `/leads/${(await leadByCompany("Menon Healthcare Services Pvt Ltd")).id}`, createdAt: daysAgo(3) },
     ],
   });
 
   // ─── Company profile ───────────────────────────────────────────────────
-  // Contact details are left blank on purpose; fill them in under Settings.
-  const profile = { firmName: "Be IPO Ready", tagline: "India's leading IPO advisor & growth capital expert", website: "https://beipoready.com", phone: null, email: null, sebiRegistration: null, address: null };
+  // Other contact details are left blank on purpose; fill them in under Settings.
+  // The firm email is the system mailbox: invitations go out from the admin's connected account.
+  const profile = {
+    firmName: "Be IPO Ready",
+    tagline: "India's leading IPO advisor & growth capital expert",
+    website: "https://beipoready.com",
+    phone: null,
+    email: ADMIN_EMAIL,
+    sebiRegistration: null,
+    address: null,
+    systemSenderUserId: admin.id,
+    // No SMTP until an admin enters it under Settings → System email.
+    smtpHost: null,
+    smtpPort: null,
+    smtpUser: null,
+    smtpPass: null,
+    smtpFrom: null,
+    smtpSecure: false,
+  };
   await prisma.companyProfile.upsert({ where: { id: 1 }, create: { id: 1, ...profile }, update: { ...profile, logoKey: null, logoMime: null } });
 
-  console.log(`Seeded. All users share the password: ${PASSWORD}`);
+  console.log(`Seeded. Admin password: ${ADMIN_PASSWORD} · all other users: ${PASSWORD}`);
   console.table([
-    { role: "Admin", email: admin.email },
+    { role: "Admin (CEO, system mailbox)", email: admin.email },
     { role: "Compliance", email: compliance.email },
     { role: "RM", email: rm1.email },
     { role: "RM", email: rm2.email },

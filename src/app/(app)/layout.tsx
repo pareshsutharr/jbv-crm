@@ -1,3 +1,4 @@
+import { OnboardingBanner } from "@/components/onboarding-banner";
 import { Sidebar } from "@/components/sidebar";
 import { TopBar } from "@/components/topbar";
 import { getCompanyProfile } from "@/lib/company";
@@ -20,6 +21,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <Sidebar user={user} badges={{ "/tasks": dueTasks }} company={{ firmName: company.firmName, logoUrl: company.logoUrl }} />
       <main className="pl-60">
         <TopBar unread={unread} company={company} />
+        {!user.onboardedAt && <OnboardingBanner />}
         {children}
       </main>
     </div>

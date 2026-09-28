@@ -6,8 +6,14 @@ export const userSelect = {
   email: true,
   role: true,
   active: true,
+  designation: true,
+  phone: true,
+  whatsapp: true,
+  meetingLink: true,
+  onboardedAt: true,
   lastLoginAt: true,
   createdAt: true,
+  connectedAccounts: { select: { provider: true, email: true } },
 } as const;
 
 /** Active RMs, for assignment dropdowns and filters. */

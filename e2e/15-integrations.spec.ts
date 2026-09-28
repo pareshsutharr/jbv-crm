@@ -55,6 +55,9 @@ test("schedule a Google Meet from the client page: calendar event + invites; com
   await rm.fill("#mt-title", "Post-listing investor relations plan");
   await expect(rm.locator("#mt-provider")).toHaveValue("GOOGLE_MEET");
   await rm.getByRole("button", { name: "Schedule", exact: true }).click();
+  // The share step confirms the calendar invite went out; close it to get back to the list.
+  await expect(rm.getByTestId("meeting-scheduled")).toContainText("Calendar invite emailed");
+  await rm.getByRole("button", { name: "Done" }).click();
 
   const row = rm.getByTestId("meeting-row").filter({ hasText: "Post-listing investor relations plan" });
   await expect(row).toContainText("invite sent");
@@ -83,6 +86,11 @@ test("cancel removes the calendar event; send email from the CRM via Gmail", asy
   expect((await rm.request.patch(`/api/meetings/${meeting.id}`, { data: { action: "cancel", reason: "Client travelling" } })).status()).toBe(200);
   expect((await mockLog(rm)).some((l) => l.method === "DELETE" && l.path.includes("/events/gev-1"))).toBe(true);
 
+  // Everyone sends from the firm mailbox: the admin sets it up once (here: the mock SMTP server).
+  const admin = await as(browser, "admin");
+  await admin.request.delete("/api/integrations/google");
+  expect((await admin.request.patch("/api/settings/system-email", { data: { smtp: { host: "localhost", port: 1026, user: "admin@beipoready.com", pass: "firm-password", from: "admin@beipoready.com", secure: false } } })).status()).toBe(200);
+
   await rm.goto(`/clients/${id}`);
   await rm.getByRole("button", { name: "+ Email" }).click();
   await expect(rm.locator("#em-to")).toHaveValue("suresh@sahyadrirenewables.in");
@@ -90,10 +98,14 @@ test("cancel removes the calendar event; send email from the CRM via Gmail", asy
   await rm.fill("#em-body", "Dear Suresh ji,\nPlease find the listing day checklist.");
   await rm.getByRole("button", { name: "Send" }).click();
   await expect(rm.getByTestId("email-threads")).toContainText("Listing day checklist");
-  const send = (await mockLog(rm)).find((l) => l.path.endsWith("/messages/send"))!;
-  const mime = Buffer.from(JSON.parse(send.body).raw, "base64url").toString("utf8");
-  expect(mime).toContain("To: suresh@sahyadrirenewables.in");
-  expect(mime).toContain("Subject: Listing day checklist");
+  // Sent from the firm address as the RM, with replies routed to the RM.
+  const [mail] = (await (await rm.request.get(`${MOCK}/__smtp`)).json()) as { from: string; to: string[]; raw: string }[];
+  expect(mail.from).toBe("admin@beipoready.com");
+  expect(mail.to).toEqual(["suresh@sahyadrirenewables.in"]);
+  expect(mail.raw).toContain("From: Rohan Sharma via Be IPO Ready <admin@beipoready.com>");
+  expect(mail.raw).toContain("Reply-To: rohan@beipoready.com");
+  expect(mail.raw).toContain("Subject: Listing day checklist");
+  await admin.request.patch("/api/settings/system-email", { data: { smtp: null } });
 });
 
 test("RM connects Microsoft: Teams meeting and Outlook sync", async ({ browser }) => {

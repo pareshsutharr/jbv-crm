@@ -15,18 +15,18 @@ npm run db:seed                 # demo data: enquiries, client companies, mandat
 npm run dev                     # http://localhost:3000
 ```
 
-### Demo accounts (password `Password@123`)
+### Demo accounts
 
-| Role                 | Email                       |
-| -------------------- | --------------------------- |
-| Admin                | admin@beipoready.com        |
-| Compliance Officer   | compliance@beipoready.com   |
-| Relationship Manager | rohan@beipoready.com        |
-| Relationship Manager | priya@beipoready.com        |
-| Viewer               | viewer@beipoready.com       |
-| Viewer (inactive)    | neha@beipoready.com         |
+| Role                          | Name          | Email                       | Password            |
+| ----------------------------- | ------------- | --------------------------- | ------------------- |
+| Admin (CEO, system mailbox)   | Rakesh Doshi  | admin@beipoready.com        | `beipoready@123456` |
+| Compliance Officer            | Vikram Rao    | compliance@beipoready.com   | `Password@123`      |
+| Relationship Manager          | Rohan Sharma  | rohan@beipoready.com        | `Password@123`      |
+| Relationship Manager          | Priya Nair    | priya@beipoready.com        | `Password@123`      |
+| Viewer                        | Kabir Singh   | viewer@beipoready.com       | `Password@123`      |
+| Viewer (inactive)             | Neha Gupta    | neha@beipoready.com         | `Password@123`      |
 
-`npm run db:seed` wipes the database and reloads the demo data.
+`npm run db:seed` wipes the database and reloads the demo data (`SEED_ADMIN_PASSWORD` overrides the admin password).
 
 ## What's in it
 
@@ -41,6 +41,9 @@ npm run dev                     # http://localhost:3000
 - **Website lead capture:** `POST /api/public/leads` for the beipoready.com forms (see Settings → Website integration).
 - **Dashboards & reports:** pipeline by stage and fees, RM performance and leaderboard, lead-source effectiveness, CSV exports.
 - **Tasks, notifications, settings:** follow-ups with due-date reminders, notification centre, company profile, reassigning an RM's book.
+- **Team invitations & onboarding:** admins invite colleagues from **Users → Invite user**. The invitee gets an emailed link (sent from the system mailbox), sets their own password, and is walked through a checklist: details → add their work email → link WhatsApp. Links are single-use and expire after 7 days; admins can copy a link or send it on WhatsApp when email isn't set up.
+- **One firm mailbox for everyone:** the administrator enters the firm's email once under **Settings → Firm email** (Gmail / Google Workspace, Outlook, Zoho, Titan, GoDaddy… presets, or any SMTP host). Every user's emails and meeting invitations are sent from it as *"Rohan Sharma via Be IPO Ready"* with **Reply-To** set to the user's own address, so replies land in their inbox. Invitations carry an iCalendar file (Accept / Decline in the client's mail app; cancellations send `METHOD:CANCEL`). Users have nothing to connect; Google / Microsoft under My account remains optional, for Meet / Teams links and captured conversations.
+- **One firm WhatsApp for everyone:** the administrator links the firm's WhatsApp once under **Settings → Firm WhatsApp** by scanning a QR code, exactly like WhatsApp Web → Linked devices (open-source WhatsApp Web client). From then on meeting details and messages sent from any lead / client page go straight to the contact's WhatsApp from that number, signed with the user's name, and are logged on the timeline. Without a link, the same buttons open the user's WhatsApp with the message prefilled (`wa.me`). See the caveats under Configuration.
 
 ## Roles
 
@@ -80,6 +83,37 @@ The CRM itself never needs a Supabase *access token* (`sbp_…`), only these con
 
 OAuth tokens are encrypted at rest (AES-256-GCM, key from `TOKEN_ENCRYPTION_KEY` or `NEXTAUTH_SECRET`).
 
+### System email (invitations)
+
+Invitation and test emails are sent through the **system sender**, an administrator chosen under **Settings → System email** (default: the seeded admin, `admin@beipoready.com`). It uses, in order:
+
+1. that administrator's connected Gmail or Outlook account (connect it under **My account**);
+2. SMTP entered under **Settings → System email** (the password is stored encrypted) — for `admin@beipoready.com` on Gmail / Google Workspace use `smtp.gmail.com`, port 587, the address as username and an [App Password](https://support.google.com/accounts/answer/185833); the `SMTP_*` environment variables are used only when nothing is saved in Settings.
+
+**Send test email to me** on that page confirms delivery. If neither is available the invitation is still created; the Users page shows the link to copy or send on WhatsApp.
+
+### Firm WhatsApp
+
+Two methods, like the beipoready.com site: the **linked WhatsApp account** first, **CallMeBot** as the fallback for staff alerts.
+
+**1. Linked WhatsApp account (main method)** — `whatsapp/server.mjs` is a separate Node service (open-source [Baileys](https://github.com/WhiskeySockets/Baileys) library, unofficial) that holds the firm's WhatsApp session. It runs under pm2 as `beipoready-crm-whatsapp` on port 3018, *outside* the Next app, so the session isn't dropped when the CRM is redeployed. The admin links the firm's number by scanning a QR code under **Settings → Firm WhatsApp**, the same way WhatsApp Web works. The CRM talks to the service with the shared secret `WHATSAPP_SERVICE_TOKEN`. Messages are queued and sent 3–7 seconds apart. With this method messages can go to any number: client messages, meeting links and staff alerts.
+
+```bash
+# on the server that runs the service (same box as the CRM, or any always-on host)
+echo 'WHATSAPP_SERVICE_TOKEN="'$(openssl rand -hex 24)'"' >> .env
+npm run whatsapp:pm2          # pm2 start whatsapp/ecosystem.config.cjs && pm2 save
+# the CRM (same box):  WHATSAPP_SERVICE_URL=http://127.0.0.1:3018  + the same token
+# the CRM on Vercel:   expose the service over https (nginx / Caddy in front of :3018) and set WHATSAPP_SERVICE_URL to that address
+```
+
+The session lives in `whatsapp/session/` (git-ignored) — keep it on persistent disk. A `Dockerfile` for the service is included for container hosts (mount a volume at `/app/whatsapp/session`).
+
+**2. CallMeBot (fallback)** — `src/lib/callmebot.ts` calls the free `api.callmebot.com/whatsapp.php` API. It is used only for **staff alerts** when the linked account isn't connected, and only for staff who saved a CallMeBot API key under **My account** (each person gets one by sending "I allow callmebot to send me messages" to CallMeBot on WhatsApp). It cannot message clients.
+
+**How alerts are triggered** — `src/lib/staff-alerts.ts` → `alertNewWebsiteLead()` runs when the website posts an enquiry (`POST /api/public/leads`). Recipients: the assigned RM and every administrator who has a WhatsApp number and the "WhatsApp me about new website enquiries" toggle on (My account). The in-app notification and the WhatsApp alert are independent: a failure in one never stops the other.
+
+WhatsApp doesn't allow automation on normal accounts, so heavy use of the Baileys method can get the linked number banned; keep volumes conversational. For a fully supported route, switch to the official WhatsApp Business Cloud API or a provider built on it (Interakt, WATI, AiSensy).
+
 ### Website forms
 
 Set `WEBSITE_API_KEY` (and optionally `WEBSITE_ALLOWED_ORIGINS`). **Settings → Website integration** shows the endpoint and a copy-paste example.
@@ -94,6 +128,23 @@ Call these with `Authorization: Bearer $CRON_SECRET`:
 ### Timezone
 
 "Today", date filters, report buckets and displayed times use `NEXT_PUBLIC_APP_TIMEZONE` (default `Asia/Kolkata`).
+
+## Deploying to Vercel
+
+The repo carries a `vercel.json` (build runs `prisma migrate deploy` first, daily cron jobs for email sync and reminders — Vercel's Hobby plan allows one run per day; on Pro you can raise them to `*/15 * * * *` and hourly — Mumbai region). Reminders are also generated whenever a user loads a page, and **Sync emails now** under My account fetches mail on demand. What a Vercel deployment needs:
+
+| Variable | Notes |
+| --- | --- |
+| `DATABASE_URL`, `DIRECT_URL` | A hosted Postgres — a Neon or Supabase database from the Vercel Marketplace, or your own. Use the pooled URL for `DATABASE_URL` when the provider offers one. |
+| `NEXTAUTH_SECRET`, `TOKEN_ENCRYPTION_KEY`, `CRON_SECRET`, `WEBSITE_API_KEY` | Random secrets (`openssl rand -base64 32`). Vercel Cron sends `CRON_SECRET` automatically. |
+| `NEXTAUTH_URL` | The production URL (e.g. `https://growthavenues-crm.vercel.app`). Falls back to Vercel's production domain when unset. |
+| `STORAGE_DRIVER=supabase` + `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_BUCKET` | Required for document uploads: Vercel has no persistent disk, so `local` storage doesn't work there. |
+| `SMTP_*` (optional) | Or enter SMTP under Settings → Firm email after the first sign-in. |
+| `WHATSAPP_SERVICE_URL`, `WHATSAPP_SERVICE_TOKEN` | The firm WhatsApp service (see *Firm WhatsApp*). |
+
+Then `vercel --prod` from the project folder, and once: `DATABASE_URL=… DIRECT_URL=… npm run db:seed:prod` to create the administrator (`ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_NAME` override the defaults) without demo data.
+
+WhatsApp on Vercel: run the WhatsApp service on an always-on host and set `WHATSAPP_SERVICE_URL` (its public https address) and `WHATSAPP_SERVICE_TOKEN` (see *Firm WhatsApp*); until then the buttons fall back to `wa.me` links and staff alerts use CallMeBot keys.
 
 ## Tests
 

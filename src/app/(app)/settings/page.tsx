@@ -1,12 +1,25 @@
 import { Card, PageBody, PageHeader } from "@/components/layout";
 import { getCompanyProfile } from "@/lib/company";
+import { PROVIDER_LABELS } from "@/lib/integrations/config";
+import { prisma } from "@/lib/prisma";
 import { requirePageUser } from "@/lib/session";
+import { smtpSettings, systemSender } from "@/lib/system-mail";
+import { firmWhatsappStatus } from "@/lib/whatsapp-client";
+import { WhatsAppLink } from "@/components/whatsapp-link";
 import { headers } from "next/headers";
 import { CompanyForm } from "./company-form";
+import { SystemEmailCard } from "./system-email-card";
 
 export default async function SettingsPage() {
-  await requirePageUser("settings:manage");
-  const company = await getCompanyProfile();
+  const me = await requirePageUser("settings:manage");
+  const [company, sender, admins, profileRow, wa] = await Promise.all([
+    getCompanyProfile(),
+    systemSender(),
+    prisma.user.findMany({ where: { role: "ADMIN", active: true }, select: { id: true, name: true, email: true, connectedAccounts: { select: { provider: true } } }, orderBy: { name: "asc" } }),
+    prisma.companyProfile.findUnique({ where: { id: 1 }, select: { systemSenderUserId: true, smtpHost: true, smtpPort: true, smtpUser: true, smtpPass: true, smtpFrom: true, smtpSecure: true } }),
+    firmWhatsappStatus(),
+  ]);
+  const smtp = await smtpSettings(profileRow ?? null);
   const h = await headers();
   const base = process.env.NEXTAUTH_URL ?? `${h.get("x-forwarded-proto") ?? "http"}://${h.get("host")}`;
   const key = process.env.WEBSITE_API_KEY;
@@ -31,6 +44,19 @@ export default async function SettingsPage() {
       <PageBody className="max-w-3xl space-y-5">
         <Card title="Company profile">
           <CompanyForm company={company} />
+        </Card>
+        <Card title="Firm email (all users send from this mailbox)">
+          <SystemEmailCard
+            sender={{ userId: profileRow?.systemSenderUserId ?? null, method: sender.method, fromEmail: sender.fromEmail, summary: sender.summary }}
+            admins={admins.map((a) => ({ id: a.id, name: a.name, email: a.email, mailboxes: a.connectedAccounts.map((c) => PROVIDER_LABELS[c.provider].split(" ")[0]) }))}
+            smtp={smtp ? { host: smtp.host, port: smtp.port, user: smtp.user, from: smtp.from, secure: smtp.secure, source: smtp.source, hasPassword: !!smtp.pass } : null}
+            currentUserId={me.id}
+          />
+        </Card>
+        <Card title="Firm WhatsApp (all users send from this number)">
+          <div className="px-5 py-4">
+            <WhatsAppLink initial={{ ...wa, qr: null }} canManage />
+          </div>
         </Card>
         <Card title="Website integration (beipoready.com forms)">
           <div className="space-y-3 px-5 py-4 text-sm text-gray-700" data-testid="website-integration">

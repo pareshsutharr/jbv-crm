@@ -14,3 +14,6 @@ export async function POST(req: Request) {
   const users = await syncAllNotifications();
   return NextResponse.json({ ok: true, users });
 }
+
+/** Vercel Cron (and other schedulers that can only GET) — same secret, same job. */
+export const GET = POST;

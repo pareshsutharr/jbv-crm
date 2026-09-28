@@ -5,16 +5,18 @@ import { StageProgress } from "@/components/mandate-list";
 import { MeetingList } from "@/components/meetings-card";
 import { StatTile } from "@/components/stat";
 import { Badge } from "@/components/ui";
+import { getCompanyProfile } from "@/lib/company";
 import { getDashboard } from "@/lib/dashboard";
 import { formatDate, formatINRCompact } from "@/lib/format";
 import { KYC_STATUS_TONE, LEAD_STATUS_LABELS, LEAD_STATUS_TONE, MANDATE_STAGE_LABELS, mandateStageTone, ROLE_LABELS, SERVICE_SHORT_LABELS } from "@/lib/labels";
 import { can } from "@/lib/rbac";
 import { requirePageUser } from "@/lib/session";
+import { firmWhatsappLinked } from "@/lib/whatsapp-client";
 
 export default async function DashboardPage() {
   const user = await requirePageUser();
   const org = can(user.role, "dashboard:org");
-  const d = await getDashboard(user);
+  const [d, firm, linked] = await Promise.all([getDashboard(user), getCompanyProfile(), firmWhatsappLinked()]);
   const pct = (n: number) => `${(n * 100).toFixed(0)}%`;
 
   return (
@@ -45,7 +47,7 @@ export default async function DashboardPage() {
 
         {can(user.role, "meetings:manage") && (
           <Card title="My upcoming meetings" actions={<Link href="/meetings" className="text-xs font-medium text-brand-600 hover:underline">All meetings →</Link>}>
-            <MeetingList meetings={d.myMeetings} showRelated />
+            <MeetingList meetings={d.myMeetings} showRelated firmName={firm.firmName} whatsappLinked={linked} />
           </Card>
         )}
 

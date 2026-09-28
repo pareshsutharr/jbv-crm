@@ -169,11 +169,13 @@ enum NotificationType {
   TASK_DUE
   MANDATE_STAGE
   MANDATE_DUE
+  USER_JOINED
 }
 
 enum IntegrationProvider {
   GOOGLE
   MICROSOFT
+  SMTP // any mailbox with an app password: sending only (invites carry a calendar file)
 }
 
 enum MeetingProvider {
@@ -199,16 +201,30 @@ enum EmailDirection {
 // ─── Users & auth ─────────────────────────────────────────────────────────
 
 model User {
-  id           String    @id @default(cuid())
-  name         String
-  email        String    @unique
-  passwordHash String
-  role         Role      @default(VIEWER)
+  id             String    @id @default(cuid())
+  name           String
+  email          String    @unique
+  passwordHash   String
+  role           Role      @default(VIEWER)
   // Self-signups are created inactive and must be activated by an Admin.
-  active       Boolean   @default(true)
-  lastLoginAt  DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  active         Boolean   @default(true)
+  // Profile & personal channels (set during onboarding, editable under My account).
+  designation    String? // e.g. "CEO", "Relationship Manager"
+  phone          String?
+  whatsapp       String? // WhatsApp number incl. country code; used for click-to-chat links
+  meetingLink    String? // personal meeting room (Zoom / Meet) offered when scheduling without a calendar
+  // Staff WhatsApp alerts (new website enquiries): sent from the firm's linked
+  // WhatsApp, or via CallMeBot when the user registered a key with it.
+  whatsappAlerts Boolean   @default(true)
+  callMeBotKey   String?
+  // Set when the user finishes the onboarding checklist (invited users) or is seeded/created by an admin.
+  onboardedAt    DateTime?
+  lastLoginAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  invitationsSent    Invitation[] @relation("InvitationInvitedBy")
+  acceptedInvitation Invitation?  @relation("InvitationAccepted")
 
   assignedLeads        Lead[]                @relation("LeadAssignedRm")
   createdLeads         Lead[]                @relation("LeadCreatedBy")
@@ -232,6 +248,37 @@ model User {
   emailMessages        EmailMessage[]
 
   @@index([role])
+}
+
+// An admin's invitation to join the CRM. The invitee opens the emailed link,
+// sets a password and is walked through onboarding (connect mailbox, add
+// WhatsApp). The token is stored hashed for lookup and encrypted so an admin
+// can copy / re-share the link later.
+model Invitation {
+  id             String    @id @default(cuid())
+  email          String
+  name           String?
+  designation    String?
+  phone          String? // optional: lets the admin WhatsApp the link directly
+  role           Role      @default(RM)
+  tokenHash      String    @unique
+  tokenEncrypted String
+  expiresAt      DateTime
+  invitedById    String
+  invitedBy      User      @relation("InvitationInvitedBy", fields: [invitedById], references: [id], onDelete: Cascade)
+  // Delivery of the invitation email (via the system mailbox, see src/lib/system-mail.ts).
+  sentAt         DateTime?
+  sentVia        String? // "GOOGLE" | "MICROSOFT" | "SMTP"
+  sendError      String?
+  acceptedAt     DateTime?
+  acceptedUserId String?   @unique
+  acceptedUser   User?     @relation("InvitationAccepted", fields: [acceptedUserId], references: [id], onDelete: SetNull)
+  revokedAt      DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([email])
+  @@index([invitedById])
 }
 
 // ─── Leads & clients ──────────────────────────────────────────────────────
@@ -525,18 +572,30 @@ model Notification {
 
 // Singleton row (id = 1): firm profile shown across the CRM.
 model CompanyProfile {
-  id               Int      @id @default(1)
-  firmName         String   @default("Be IPO Ready")
-  tagline          String?
-  email            String?
-  phone            String?
-  website          String?
-  address          String?
-  sebiRegistration String?
-  logoKey          String? // storage key of the uploaded logo
-  logoMime         String?
-  updatedAt        DateTime @updatedAt
-  updatedById      String?
+  id                 Int      @id @default(1)
+  firmName           String   @default("Be IPO Ready")
+  tagline            String?
+  email              String?
+  phone              String?
+  website            String?
+  address            String?
+  sebiRegistration   String?
+  logoKey            String? // storage key of the uploaded logo
+  logoMime           String?
+  // System emails (invitations, test mails) are sent through this user's
+  // connected Gmail / Outlook mailbox; falls back to the SMTP settings below
+  // (or SMTP_* env), then to the first admin with a connected mailbox.
+  systemSenderUserId String?
+  // SMTP for system email, editable under Settings → System email. When
+  // smtpHost is set these override the SMTP_* environment variables.
+  smtpHost           String?
+  smtpPort           Int?
+  smtpUser           String?
+  smtpPass           String? // encrypted (AES-256-GCM, see src/lib/crypto.ts)
+  smtpFrom           String?
+  smtpSecure         Boolean  @default(false) // implicit TLS (port 465); otherwise STARTTLS when offered
+  updatedAt          DateTime @updatedAt
+  updatedById        String?
 }
 
 // ─── Mandates (engagement pipeline) ───────────────────────────────────────
@@ -601,10 +660,15 @@ model ConnectedAccount {
   user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   provider     IntegrationProvider
   email        String
-  accessToken  String // encrypted
+  accessToken  String // encrypted (for SMTP: the mailbox / app password)
   refreshToken String? // encrypted
   expiresAt    DateTime?
   scopes       String?
+  // SMTP mailboxes (provider = SMTP); smtpUser only when the login differs from the address
+  smtpHost     String?
+  smtpUser     String?
+  smtpPort     Int?
+  smtpSecure   Boolean             @default(false)
   lastSyncAt   DateTime?
   syncError    String?
   createdAt    DateTime            @default(now())

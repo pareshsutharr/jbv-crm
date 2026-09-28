@@ -49,6 +49,9 @@ export function LoginForm({ registered }: { registered?: string }) {
           Account created. An administrator must activate it before you can sign in.
         </p>
       )}
+      {registered === "invited" && (
+        <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-800">Your account is ready. Sign in with the password you just set.</p>
+      )}
       {registered === "admin" && (
         <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-800">Admin account created. Sign in to continue.</p>
       )}

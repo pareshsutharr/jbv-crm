@@ -9,3 +9,6 @@ export async function POST(req: Request) {
   }
   return NextResponse.json({ ok: true, results: await syncAllMailboxes() });
 }
+
+/** Vercel Cron (and other schedulers that can only GET) — same secret, same job. */
+export const GET = POST;

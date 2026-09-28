@@ -1,0 +1,10 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "buildCommand": "npx prisma migrate deploy && npm run build",
+  "regions": ["bom1"],
+  "crons": [
+    { "path": "/api/cron/email-sync", "schedule": "30 2 * * *" },
+    { "path": "/api/cron/notifications", "schedule": "0 3 * * *" }
+  ]
+}

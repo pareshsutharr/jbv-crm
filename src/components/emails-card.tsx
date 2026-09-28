@@ -5,7 +5,7 @@ import { ArrowDownLeft, ArrowUpRight, RefreshCw } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { Card, EmptyState } from "@/components/layout";
-import { Button, ErrorText, Field, Input, Modal, Select, Textarea } from "@/components/ui";
+import { Button, ErrorText, Field, Input, Modal, Textarea } from "@/components/ui";
 import { api } from "@/lib/api-client";
 import { formatDateTime } from "@/lib/format";
 
@@ -37,14 +37,16 @@ export function EmailsCard({
   parent: Parent;
   emails: EmailRow[];
   recipients: { name: string; email: string }[];
-  connected: { google: boolean; microsoft: boolean };
+  connected: { google: boolean; microsoft: boolean; firmMailbox?: boolean };
   canSend: boolean;
 }) {
   const router = useRouter();
   const [composing, setComposing] = useState<{ to?: string; subject?: string } | null>(null);
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [syncing, setSyncing] = useState(false);
-  const anyConnected = connected.google || connected.microsoft;
+  // Sending goes through the firm mailbox; only a user's own Google / Microsoft account can be read (sync).
+  const anyConnected = !!connected.firmMailbox;
+  const canSync = connected.google || connected.microsoft;
 
   const threads = useMemo(() => {
     const map = new Map<string, EmailRow[]>();
@@ -72,13 +74,13 @@ export function EmailsCard({
       title={`Email conversations${emails.length ? ` (${threads.length})` : ""}`}
       actions={
         <div className="flex items-center gap-1">
-          {anyConnected && (
+          {canSync && (
             <Button size="sm" variant="ghost" onClick={sync} loading={syncing} title="Fetch new emails from your mailbox">
               {!syncing && <RefreshCw size={13} />} Sync
             </Button>
           )}
           {canSend && (
-            <Button size="sm" onClick={() => setComposing({})} disabled={!anyConnected} title={anyConnected ? undefined : "Connect Gmail or Outlook under My account"}>
+            <Button size="sm" onClick={() => setComposing({})} disabled={!anyConnected} title={anyConnected ? undefined : "An administrator needs to set up the firm mailbox under Settings → System email"}>
               + Email
             </Button>
           )}
@@ -88,7 +90,7 @@ export function EmailsCard({
       {threads.length === 0 ? (
         <EmptyState
           title="No emails captured yet"
-          description={anyConnected ? "Emails with this company's contacts appear here after a sync." : "Connect Gmail or Outlook under My account to track conversations automatically."}
+          description={canSync ? "Emails with this company's contacts appear here after a sync." : anyConnected ? "Emails you send from the CRM appear here (sent from the firm mailbox as you; replies come to your inbox)." : "Once the firm mailbox is set up under Settings, emails you send from the CRM appear here."}
         />
       ) : (
         <ul className="divide-y divide-gray-100" data-testid="email-threads">
@@ -162,11 +164,12 @@ function ComposeModal({
 }: {
   parent: Parent;
   recipients: { name: string; email: string }[];
-  connected: { google: boolean; microsoft: boolean };
+  connected: { google: boolean; microsoft: boolean; firmMailbox?: boolean };
   initial: { to?: string; subject?: string };
   onClose: () => void;
 }) {
   const router = useRouter();
+  void connected;
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const list = (s: FormDataEntryValue | null) =>
@@ -181,7 +184,7 @@ function ComposeModal({
     setError(null);
     const f = new FormData(e.currentTarget);
     try {
-      await api("/api/emails", "POST", { ...parent, to: list(f.get("to")), cc: list(f.get("cc")), subject: f.get("subject"), body: f.get("body"), provider: f.get("provider") || undefined });
+      await api("/api/emails", "POST", { ...parent, to: list(f.get("to")), cc: list(f.get("cc")), subject: f.get("subject"), body: f.get("body") });
       onClose();
       router.refresh();
     } catch (err) {
@@ -209,11 +212,7 @@ function ComposeModal({
     >
       <form id="compose-email" onSubmit={submit} className="space-y-3">
         <ErrorText>{error}</ErrorText>
-        {connected.google && connected.microsoft && (
-          <Field label="Send from" htmlFor="em-provider">
-            <Select id="em-provider" name="provider" options={[{ value: "GOOGLE", label: "Gmail" }, { value: "MICROSOFT", label: "Outlook" }]} />
-          </Field>
-        )}
+        <p className="text-xs text-gray-500">Sent from the firm mailbox as you; replies come to your own inbox.</p>
         <Field label="To" htmlFor="em-to" hint={recipients.length ? `Contacts: ${recipients.map((r) => `${r.name} <${r.email}>`).join(", ")}` : undefined}>
           <Input id="em-to" name="to" defaultValue={initial.to ?? recipients[0]?.email ?? ""} required />
         </Field>

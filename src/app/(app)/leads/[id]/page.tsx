@@ -6,8 +6,10 @@ import { History } from "@/components/history";
 import { MeetingsCard } from "@/components/meetings-card";
 import { InteractionLog } from "@/components/interaction-log";
 import { RecordTasks } from "@/components/record-tasks";
+import { WhatsAppCard } from "@/components/whatsapp-card";
 import { Card, PageBody, PageHeader } from "@/components/layout";
 import { Badge } from "@/components/ui";
+import { getCompanyProfile } from "@/lib/company";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { LEAD_SOURCE_LABELS, LEAD_STATUS_LABELS, LEAD_STATUS_TONE, SERVICE_LABELS } from "@/lib/labels";
 import { interactionInclude, timelineWhere, toTimelineEntry } from "@/lib/interactions";
@@ -30,10 +32,11 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
     },
   });
   if (!lead || !ownsRecord(user, lead)) notFound();
-  const [rms, comms, interactions] = await Promise.all([
+  const [rms, comms, interactions, firm] = await Promise.all([
     listRms(),
     loadRecordComms(user, { leadId: lead.id }),
     prisma.interaction.findMany({ where: timelineWhere({ leadId: lead.id }), include: interactionInclude, orderBy: [{ occurredAt: "desc" }, { createdAt: "desc" }] }),
+    getCompanyProfile(),
   ]);
   const converted = lead.status === "CONVERTED";
 
@@ -119,13 +122,18 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
           )}
         </Card>
         <div className="grid gap-5 xl:grid-cols-2">
-          <MeetingsCard
-            parent={{ leadId: lead.id }}
-            meetings={comms.meetings}
-            contacts={[{ name: lead.name, email: lead.email }]}
-            connected={comms.connected}
-            canSchedule={can(user.role, "meetings:manage") && !lead.client}
-          />
+          <div className="space-y-5">
+            <MeetingsCard
+              parent={{ leadId: lead.id }}
+              meetings={comms.meetings}
+              contacts={[{ name: lead.name, email: lead.email, phone: lead.phone }]}
+              connected={comms.connected}
+              me={comms.me}
+              firmName={firm.firmName}
+              canSchedule={can(user.role, "meetings:manage") && !lead.client}
+            />
+            <WhatsAppCard parent={{ leadId: lead.id }} contacts={[{ name: lead.name, phone: lead.phone }]} firm={comms.firm.whatsapp} isAdmin={user.role === "ADMIN"} canSend={can(user.role, "interactions:log") && !lead.client} />
+          </div>
           {!lead.client && <RecordTasks user={user} target={{ leadId: lead.id }} />}
         </div>
         <EmailsCard

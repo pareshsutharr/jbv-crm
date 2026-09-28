@@ -1,0 +1,13 @@
+# Expose the CRM WhatsApp service over https on an existing site, e.g.
+#   https://beipoready.com/crm-whatsapp/  →  http://127.0.0.1:3018/
+# Add inside the site's `server { ... }` block that already has TLS, then:
+#   sudo nginx -t && sudo systemctl reload nginx
+# On the CRM set WHATSAPP_SERVICE_URL="https://beipoready.com/crm-whatsapp" (no trailing slash).
+location /crm-whatsapp/ {
+    proxy_pass http://127.0.0.1:3018/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_read_timeout 60s;
+    # Only the CRM (bearer token) should reach this; nothing else is served here.
+}

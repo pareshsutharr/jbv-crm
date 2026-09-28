@@ -11,7 +11,9 @@ import { Card, EmptyState, PageBody, PageHeader } from "@/components/layout";
 import { MandateList } from "@/components/mandate-list";
 import { NewMandateButton } from "@/components/mandate-form";
 import { RecordTasks } from "@/components/record-tasks";
+import { WhatsAppCard } from "@/components/whatsapp-card";
 import { Badge } from "@/components/ui";
+import { getCompanyProfile } from "@/lib/company";
 import { screenEligibility } from "@/lib/eligibility";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { interactionInclude, timelineWhere, toTimelineEntry } from "@/lib/interactions";
@@ -46,7 +48,7 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
     },
   });
   if (!client || !ownsRecord(user, client)) notFound();
-  const [rms, advisors, comms, interactions] = await Promise.all([
+  const [rms, advisors, comms, interactions, firm] = await Promise.all([
     listRms(),
     advisorOptions(),
     loadRecordComms(user, { clientId: client.id }),
@@ -55,6 +57,7 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
       include: interactionInclude,
       orderBy: [{ occurredAt: "desc" }, { createdAt: "desc" }],
     }),
+    getCompanyProfile(),
   ]);
 
   const transitions = KYC_TRANSITIONS.filter((t) => t.from === client.kycStatus && can(user.role, t.permission)).map(({ to, label, requiresNote }) => ({
@@ -226,11 +229,14 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
             <MeetingsCard
               parent={{ clientId: client.id }}
               meetings={comms.meetings}
-              contacts={client.contacts.map((c) => ({ name: c.name, email: c.email }))}
+              contacts={client.contacts.map((c) => ({ name: c.name, email: c.email, phone: c.phone }))}
               mandates={client.mandates.map((m) => ({ id: m.id, code: m.code, title: m.title }))}
               connected={comms.connected}
+              me={comms.me}
+              firmName={firm.firmName}
               canSchedule={can(user.role, "meetings:manage")}
             />
+            <WhatsAppCard parent={{ clientId: client.id }} contacts={client.contacts.map((c) => ({ name: c.name, phone: c.phone }))} firm={comms.firm.whatsapp} isAdmin={user.role === "ADMIN"} canSend={can(user.role, "interactions:log")} />
             <RecordTasks user={user} target={{ clientId: client.id }} />
             <InteractionLog
               target={{ clientId: client.id }}

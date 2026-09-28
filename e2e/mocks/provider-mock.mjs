@@ -1,3 +1,12 @@
+// Gmail returns a fresh id per sent message; mirror that so repeated sends don't collide.
+let sentCount = 0;
+// Messages received by the SMTP mock below (system email via Settings → SMTP).
+const smtpMessages = [];
+const SMTP_PORT = 1026;
+// Fake WhatsApp service (whatsapp/server.mjs) under /wa: link → QR → connected after two status polls.
+const WA_TOKEN = "mock-wa-token";
+const wa = { status: "disconnected", phone: null, polls: 0, error: null, connectedAt: null };
+const waMessages = [];
 // Minimal mock of the Google (OAuth, Calendar, Gmail) and Microsoft (OAuth, Graph)
 // endpoints the CRM uses. Started by Playwright; the CRM is pointed at it via env
 // (see `npm run start:e2e`). GET /__log returns the requests it received.
@@ -45,7 +54,27 @@ http
     if (p !== "/__log") log.push({ method: req.method, path: p, query: Object.fromEntries(url.searchParams), auth: req.headers.authorization ?? null, body });
 
     if (p === "/__log") return json(res, 200, log);
-    if (p === "/__reset") return (log.length = 0), json(res, 200, { ok: true });
+    if (p === "/__reset") return (log.length = 0), (smtpMessages.length = 0), (waMessages.length = 0), json(res, 200, { ok: true });
+    if (p === "/__smtp") return json(res, 200, smtpMessages);
+    if (p === "/__wa") return json(res, 200, waMessages);
+    if (p === "/__wa/reset") return Object.assign(wa, { status: "disconnected", phone: null, polls: 0, error: null, connectedAt: null }), json(res, 200, { ok: true });
+    if (p.startsWith("/wa/")) {
+      if (req.headers.authorization !== `Bearer ${WA_TOKEN}`) return json(res, 401, { error: "Unauthorized" });
+      const waBody = () => ({ status: wa.status, phone: wa.phone, qr: wa.status === "qr" ? "mock-qr-payload" : null, error: wa.error, connectedAt: wa.connectedAt, queued: 0 });
+      if (p === "/wa/status") {
+        if (wa.status === "qr" && ++wa.polls >= 2) Object.assign(wa, { status: "connected", phone: "919999900000", connectedAt: new Date().toISOString() });
+        return json(res, 200, waBody());
+      }
+      if (p === "/wa/link" && req.method === "POST") return Object.assign(wa, { status: "qr", phone: null, polls: 0, error: null, connectedAt: null }), json(res, 200, waBody());
+      if (p === "/wa/unlink" && req.method === "POST") return Object.assign(wa, { status: "disconnected", phone: null, polls: 0, connectedAt: null }), json(res, 200, { ok: true });
+      if (p === "/wa/send" && req.method === "POST") {
+        if (wa.status !== "connected") return json(res, 409, { error: "WhatsApp isn't linked" });
+        const msg = JSON.parse(body || "{}");
+        waMessages.push(msg);
+        return json(res, 200, { sent: true, id: `wa-${waMessages.length}`, to: msg.phone });
+      }
+      return json(res, 404, { error: "Not found" });
+    }
 
     // ── Supabase Storage ──
     const so = p.match(/^\/supabase\/storage\/v1\/object\/([^/]+)\/(.+)$/);
@@ -89,7 +118,7 @@ http
       if (!authed(req, "g-at")) return json(res, 401, { error: { message: "Invalid Credentials" } });
       return json(res, 200, { messages: gmail.map((m) => ({ id: m.id, threadId: m.threadId })) });
     }
-    if (p === "/google/gmail/gmail/v1/users/me/messages/send" && req.method === "POST") return json(res, 200, { id: "gsent-1", threadId: "gt-sent" });
+    if (p === "/google/gmail/gmail/v1/users/me/messages/send" && req.method === "POST") return json(res, 200, { id: `gsent-${++sentCount}`, threadId: "gt-sent" });
     const gm = p.match(/^\/google\/gmail\/gmail\/v1\/users\/me\/messages\/([^/]+)$/);
     if (gm) {
       const m = gmail.find((x) => x.id === gm[1]);
@@ -150,3 +179,73 @@ http
     json(res, 404, { error: `mock: no route for ${req.method} ${p}` });
   })
   .listen(PORT, () => console.log(`provider mock on :${PORT}`));
+
+// ─── SMTP mock ─────────────────────────────────────────────────────────────
+// Enough of RFC 5321 for nodemailer: EHLO, AUTH PLAIN/LOGIN, MAIL, RCPT, DATA, QUIT.
+import net from "node:net";
+net
+  .createServer((sock) => {
+    let buffer = "";
+    let inData = false;
+    let auth = null; // "PLAIN" | "LOGIN_USER" | "LOGIN_PASS"
+    let msg = { from: null, to: [], raw: "" };
+    const reply = (s) => sock.write(`${s}\r\n`);
+    reply("220 mock-smtp ESMTP ready");
+    sock.on("data", (chunk) => {
+      buffer += chunk.toString("utf8");
+      let i;
+      while ((i = buffer.indexOf("\r\n")) >= 0) {
+        const line = buffer.slice(0, i);
+        buffer = buffer.slice(i + 2);
+        if (inData) {
+          if (line === ".") {
+            inData = false;
+            smtpMessages.push(msg);
+            msg = { from: null, to: [], raw: "" };
+            reply("250 OK queued");
+          } else msg.raw += `${line.startsWith("..") ? line.slice(1) : line}\r\n`;
+          continue;
+        }
+        if (auth === "PLAIN") { auth = null; reply("235 Authentication successful"); continue; }
+        if (auth === "LOGIN_USER") { auth = "LOGIN_PASS"; reply("334 UGFzc3dvcmQ6"); continue; }
+        if (auth === "LOGIN_PASS") { auth = null; reply("235 Authentication successful"); continue; }
+        const [cmd, ...rest] = line.split(" ");
+        switch (cmd.toUpperCase()) {
+          case "EHLO":
+          case "HELO":
+            sock.write("250-mock-smtp\r\n250-AUTH PLAIN LOGIN\r\n250 8BITMIME\r\n");
+            break;
+          case "AUTH":
+            if (rest[0]?.toUpperCase() === "PLAIN") {
+              if (rest[1]) reply("235 Authentication successful");
+              else { auth = "PLAIN"; reply("334 "); }
+            } else { auth = "LOGIN_USER"; reply("334 VXNlcm5hbWU6"); }
+            break;
+          case "MAIL":
+            msg.from = /<([^>]*)>/.exec(line)?.[1] ?? null;
+            reply("250 OK");
+            break;
+          case "RCPT":
+            msg.to.push(/<([^>]*)>/.exec(line)?.[1] ?? "");
+            reply("250 OK");
+            break;
+          case "DATA":
+            inData = true;
+            reply("354 End data with <CR><LF>.<CR><LF>");
+            break;
+          case "RSET":
+          case "NOOP":
+            reply("250 OK");
+            break;
+          case "QUIT":
+            reply("221 Bye");
+            sock.end();
+            break;
+          default:
+            reply("500 Unknown command");
+        }
+      }
+    });
+    sock.on("error", () => undefined);
+  })
+  .listen(SMTP_PORT, () => console.log(`smtp mock on :${SMTP_PORT}`));

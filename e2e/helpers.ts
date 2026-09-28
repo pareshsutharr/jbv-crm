@@ -1,6 +1,8 @@
 import { expect, type Browser, type Page } from "@playwright/test";
 
 export const PASSWORD = "Password@123";
+/** The seeded administrator (Rakesh Doshi, CEO) has its own password. */
+export const ADMIN_PASSWORD = "beipoready@123456";
 export const USERS = {
   admin: "admin@beipoready.com",
   compliance: "compliance@beipoready.com",
@@ -9,10 +11,12 @@ export const USERS = {
   viewer: "viewer@beipoready.com",
 } as const;
 
-export async function login(page: Page, email: string) {
+export const passwordFor = (email: string) => (email === USERS.admin ? ADMIN_PASSWORD : PASSWORD);
+
+export async function login(page: Page, email: string, password = passwordFor(email)) {
   await page.goto("/login");
   await page.fill("#email", email);
-  await page.fill("#password", PASSWORD);
+  await page.fill("#password", password);
   await page.click("button[type=submit]");
   await expect(page).toHaveURL("/");
 }

@@ -54,6 +54,8 @@ export function matchMessage(index: Awaited<ReturnType<typeof buildEmailIndex>>,
  * with a known lead/client. Unrelated personal mail is never stored.
  */
 export async function syncAccount(account: ConnectedAccount, now = new Date()) {
+  // SMTP mailboxes send only; there is nothing to pull.
+  if (account.provider === "SMTP") return { fetched: 0, stored: 0, skipped: true };
   const since = account.lastSyncAt ? new Date(account.lastSyncAt.getTime() - 5 * 60_000) : new Date(now.getTime() - 30 * 86_400_000);
   try {
     const [messages, index] = await Promise.all([listMessagesSince(account, since), buildEmailIndex()]);

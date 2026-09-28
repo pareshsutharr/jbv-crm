@@ -21,6 +21,7 @@ export default withAuth(
 );
 
 export const config = {
-  // Everything except auth pages, NextAuth's own routes, signup API and static assets.
-  matcher: ["/((?!login|signup|api/auth|api/signup|api/cron|api/public|api/settings/logo|_next/static|_next/image|favicon.ico).*)"],
+  // Everything except auth pages, NextAuth's own routes, signup / invite-acceptance APIs and static assets.
+  // (`invite/` and `api/invite/` are public; `/api/invitations` — the admin API — is not.)
+  matcher: ["/((?!login|signup|invite/|api/auth|api/signup|api/invite/|api/cron|api/public|api/settings/logo|_next/static|_next/image|favicon.ico).*)"],
 };

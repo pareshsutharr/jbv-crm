@@ -18,7 +18,19 @@ export const MEETING_PROVIDER_LABELS: Record<MeetingProvider, string> = {
 /** Which connected account a provider needs to auto-create the video link. */
 export const REQUIRED_ACCOUNT: Partial<Record<MeetingProvider, IntegrationProvider>> = { GOOGLE_MEET: "GOOGLE", TEAMS: "MICROSOFT" };
 
-const attendee = z.object({ email: z.string().trim().toLowerCase().email("Invalid attendee email"), name: z.string().trim().max(120).optional().nullable() });
+/** An attendee needs an email (for calendar invites) and/or a phone number (for WhatsApp). */
+const attendee = z
+  .object({
+    email: z
+      .union([z.literal(""), z.string().trim().toLowerCase().email("Invalid attendee email")])
+      .optional()
+      .nullable()
+      .transform((v) => v || null),
+    name: optionalText(120),
+    phone: optionalText(40),
+  })
+  .refine((a) => a.email || a.phone, "Each attendee needs an email or a phone number");
+export type MeetingAttendee = { email: string | null; name: string | null; phone: string | null };
 
 export const meetingCreateSchema = z
   .object({
@@ -50,7 +62,7 @@ export const meetingUpdateSchema = z.discriminatedUnion("action", [
 ]);
 
 export const meetingInclude = {
-  organizer: { select: { id: true, name: true } },
+  organizer: { select: { id: true, name: true, designation: true, whatsapp: true, email: true } },
   lead: { select: { id: true, companyName: true, assignedRmId: true } },
   client: { select: { id: true, name: true, assignedRmId: true } },
   mandate: { select: { id: true, code: true } },
@@ -68,10 +80,11 @@ export function toMeetingRow(m: Row, user: CurrentUser) {
     provider: m.provider,
     joinUrl: m.joinUrl,
     location: m.location,
-    attendees: (m.attendees as { email: string; name?: string | null }[]) ?? [],
+    attendees: ((m.attendees as Partial<MeetingAttendee>[] | null) ?? []).map((a) => ({ email: a.email ?? null, name: a.name ?? null, phone: a.phone ?? null })),
     status: m.status,
     outcome: m.outcome,
     organizer: m.organizer.name,
+    organizerDetails: { name: m.organizer.name, designation: m.organizer.designation, whatsapp: m.organizer.whatsapp, email: m.organizer.email },
     inCalendar: !!m.externalEventId,
     related: m.client ? { kind: "client" as const, id: m.client.id, name: m.client.name } : m.lead ? { kind: "lead" as const, id: m.lead.id, name: m.lead.companyName } : null,
     mandate: m.mandate,

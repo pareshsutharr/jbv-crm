@@ -44,7 +44,7 @@ test("client timeline carries over lead-stage interactions and shows admin edit 
   await expect(timeline.getByText("Referral from a CA partner")).toBeVisible();
   await expect(timeline.getByText("lead stage")).toBeVisible();
   await expect(timeline.getByText("Price band finalised at ₹142–150")).toBeVisible();
-  await timeline.getByText(/Edited by Aarti Mehta/).click();
+  await timeline.getByText(/Edited by Rakesh Doshi/).click();
   await expect(timeline.getByText("Price band finalised at ₹140–148")).toBeVisible();
   await expect(timeline.getByText(/corrected to the final band/)).toBeVisible();
   await expect(viewer.getByTestId("log-interaction")).toHaveCount(0); // viewer is read-only
@@ -61,7 +61,7 @@ test("admin edit and remove require a reason; removed entries stay visible", asy
   await admin.fill("#am-summary", "Shared DRHP chapter drafts (business, risk factors, T+4 feedback) for CFO review.");
   await admin.fill("#am-reason", "Added refund date");
   await admin.getByRole("button", { name: "Save edit" }).click();
-  await expect(admin.getByTestId("timeline-entry").filter({ hasText: "T+4" })).toContainText("Edited by Aarti Mehta");
+  await expect(admin.getByTestId("timeline-entry").filter({ hasText: "T+4" })).toContainText("Edited by Rakesh Doshi");
 
   // Remove without reason is refused by the API
   const { interactions } = await (await admin.request.get(`/api/interactions?clientId=${clientId}`)).json();
@@ -72,7 +72,7 @@ test("admin edit and remove require a reason; removed entries stay visible", asy
   await edited.getByRole("button", { name: "Remove" }).click();
   await admin.fill("#am-reason", "Logged against wrong client");
   await admin.getByRole("button", { name: "Remove", exact: true }).last().click();
-  await expect(admin.getByText(/Removed by Aarti Mehta .* reason: Logged against wrong client/)).toBeVisible();
+  await expect(admin.getByText(/Removed by Rakesh Doshi .* reason: Logged against wrong client/)).toBeVisible();
 
   // RM sees the removal marker but not the removed text; compliance sees both.
   const rm = await as(browser, "rm2");

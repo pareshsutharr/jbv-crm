@@ -15,10 +15,16 @@ type UserRow = {
   email: string;
   role: Role;
   active: boolean;
+  designation: string | null;
+  whatsapp: string | null;
+  onboardedAt: string | null;
+  connectedAccounts: { provider: "GOOGLE" | "MICROSOFT" | "SMTP"; email: string }[];
   lastLoginAt: string | null;
   createdAt: string;
   book: { leads: number; clients: number } | null;
 };
+
+const MAILBOX: Record<"GOOGLE" | "MICROSOFT" | "SMTP", string> = { GOOGLE: "Gmail", MICROSOFT: "Outlook", SMTP: "Email" };
 
 const roleOptions = options(ROLE_LABELS);
 
@@ -68,6 +74,7 @@ export function UsersTable({ users, currentUserId }: { users: UserRow[]; current
                 <Th>Name</Th>
                 <Th>Role</Th>
                 <Th>Status</Th>
+                <Th>Setup</Th>
                 <Th>Book</Th>
                 <Th>Last login</Th>
                 <Th className="text-right">Actions</Th>
@@ -80,12 +87,24 @@ export function UsersTable({ users, currentUserId }: { users: UserRow[]; current
                     <div className="font-medium text-gray-900">
                       {u.name} {u.id === currentUserId && <span className="text-xs font-normal text-gray-400">(you)</span>}
                     </div>
-                    <div className="text-xs text-gray-500">{u.email}</div>
+                    <div className="text-xs text-gray-500">
+                      {u.email}
+                      {u.designation && <span className="text-gray-400"> · {u.designation}</span>}
+                    </div>
                   </Td>
                   <Td>
                     <Badge tone={ROLE_TONE[u.role]}>{ROLE_SHORT_LABELS[u.role]}</Badge>
                   </Td>
                   <Td>{u.active ? <Badge tone="green">Active</Badge> : <Badge tone="amber">Inactive</Badge>}</Td>
+                  <Td className="text-xs text-gray-600">
+                    <div className="flex flex-col gap-0.5" title="Optional Google / Microsoft connection (Meet & Teams links); everyone sends email and WhatsApp from the firm's shared channels">
+                      <span className={u.connectedAccounts.length ? "text-emerald-700" : "text-gray-400"}>
+                        {u.connectedAccounts.length ? `✓ ${u.connectedAccounts.map((a) => MAILBOX[a.provider]).join(", ")}` : "Firm mailbox"}
+                      </span>
+                      <span className={u.whatsapp ? "text-emerald-700" : "text-gray-400"}>{u.whatsapp ? "✓ WhatsApp no. in signature" : "– No WhatsApp no."}</span>
+                      {u.active && !u.onboardedAt && <span className="text-amber-700">Onboarding pending</span>}
+                    </div>
+                  </Td>
                   <Td className="text-xs text-gray-600">{u.book ? `${u.book.leads} leads · ${u.book.clients} clients` : "—"}</Td>
                   <Td>
                     {formatDateTime(u.lastLoginAt)}
@@ -155,7 +174,7 @@ function CreateUserModal({ open, onClose, onDone }: { open: boolean; onClose: ()
       open={open}
       onClose={onClose}
       title="New user"
-      description="The user can sign in immediately with this password."
+      description="Creates the account with a password you share yourself. Prefer “Invite user” above so they set their own password and are walked through onboarding."
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>

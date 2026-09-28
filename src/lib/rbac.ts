@@ -78,6 +78,8 @@ export function ownsRecord(user: { id: string; role: Role }, record: { assignedR
 export const ROUTE_RULES: { prefix: string; permission: Permission }[] = [
   { prefix: "/users", permission: "users:manage" },
   { prefix: "/api/users", permission: "users:manage" },
+  { prefix: "/api/invitations", permission: "users:manage" },
   { prefix: "/settings", permission: "settings:manage" },
+  { prefix: "/api/settings/system-email", permission: "settings:manage" },
   { prefix: "/api/admin", permission: "users:manage" },
 ];

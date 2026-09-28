@@ -5,7 +5,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui";
 import { api } from "@/lib/api-client";
 
-export function IntegrationActions({ provider, connected, configured }: { provider: "GOOGLE" | "MICROSOFT"; connected: boolean; configured: boolean }) {
+export function IntegrationActions({ provider, connected, configured, returnTo }: { provider: "GOOGLE" | "MICROSOFT"; connected: boolean; configured: boolean; returnTo?: "onboarding" }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [result, setResult] = useState<string | null>(null);
@@ -34,7 +34,7 @@ export function IntegrationActions({ provider, connected, configured }: { provid
 
   if (!connected) {
     return configured ? (
-      <a href={`/api/integrations/${slug}/connect`} className="inline-flex h-9 items-center rounded-md bg-brand-600 px-3.5 text-sm font-medium text-white shadow-sm hover:bg-brand-700">
+      <a href={`/api/integrations/${slug}/connect${returnTo ? `?return=${returnTo}` : ""}`} className="inline-flex h-9 items-center rounded-md bg-brand-600 px-3.5 text-sm font-medium text-white shadow-sm hover:bg-brand-700">
         Connect
       </a>
     ) : (

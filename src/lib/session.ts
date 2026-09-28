@@ -6,7 +6,14 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { can, type Permission } from "@/lib/rbac";
 
-export type CurrentUser = { id: string; name: string; email: string; role: Role };
+export type CurrentUser = {
+  id: string;
+  name: string;
+  email: string;
+  role: Role;
+  /** null until the user completes the onboarding checklist (invited users). */
+  onboardedAt?: Date | null;
+};
 
 /**
  * Loads the signed-in user fresh from the database so role changes and
@@ -17,10 +24,10 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
   if (!session?.user?.id) return null;
   const user = await prisma.user.findUnique({
     where: { id: session.user.id },
-    select: { id: true, name: true, email: true, role: true, active: true },
+    select: { id: true, name: true, email: true, role: true, active: true, onboardedAt: true },
   });
   if (!user || !user.active) return null;
-  return { id: user.id, name: user.name, email: user.email, role: user.role };
+  return { id: user.id, name: user.name, email: user.email, role: user.role, onboardedAt: user.onboardedAt };
 }
 
 /** For server components/pages. Redirects instead of throwing. */

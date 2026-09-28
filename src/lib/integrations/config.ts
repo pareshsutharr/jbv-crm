@@ -30,13 +30,17 @@ export const MICROSOFT = {
 };
 
 export function providerConfigured(p: IntegrationProvider) {
+  if (p === "SMTP") return true; // needs no server-side setup: the user enters an app password
   return p === "GOOGLE" ? !!(GOOGLE.clientId() && GOOGLE.clientSecret()) : !!(MICROSOFT.clientId() && MICROSOFT.clientSecret());
 }
 
-export const PROVIDER_LABELS: Record<IntegrationProvider, string> = { GOOGLE: "Google (Gmail & Meet)", MICROSOFT: "Microsoft (Outlook & Teams)" };
+export const PROVIDER_LABELS: Record<IntegrationProvider, string> = { GOOGLE: "Google (Gmail & Meet)", MICROSOFT: "Microsoft (Outlook & Teams)", SMTP: "Email (app password)" };
+export const PROVIDER_SHORT: Record<IntegrationProvider, string> = { GOOGLE: "Gmail", MICROSOFT: "Outlook", SMTP: "Email" };
 
+/** Public base URL: NEXTAUTH_URL, else the Vercel production domain, else the current deployment. */
 export function appUrl() {
-  return (process.env.NEXTAUTH_URL ?? "http://localhost:3000").replace(/\/$/, "");
+  const fromVercel = process.env.VERCEL_PROJECT_PRODUCTION_URL ?? process.env.VERCEL_URL;
+  return (process.env.NEXTAUTH_URL ?? (fromVercel ? `https://${fromVercel}` : "http://localhost:3000")).replace(/\/$/, "");
 }
 
 export const redirectUri = (p: IntegrationProvider) => `${appUrl()}/api/integrations/${p.toLowerCase()}/callback`;

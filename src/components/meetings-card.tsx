@@ -2,7 +2,7 @@
 
 import type { MeetingProvider } from "@prisma/client";
 import clsx from "clsx";
-import { CalendarCheck, MapPin, Phone, Video } from "lucide-react";
+import { CalendarCheck, Check, Copy, Mail, MapPin, MessageCircle, Phone, Share2, Video } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -10,7 +10,9 @@ import { Card, EmptyState } from "@/components/layout";
 import { Badge, Button, ErrorText, Field, Input, Modal, Select, Textarea } from "@/components/ui";
 import { api } from "@/lib/api-client";
 import { formatDateTime } from "@/lib/format";
+import { meetingShareText, meetingWhen } from "@/lib/meeting-share";
 import type { MeetingRow } from "@/lib/meetings";
+import { formatWhatsApp, whatsappUrl } from "@/lib/whatsapp";
 
 const PROVIDER_LABELS: Record<MeetingProvider, string> = {
   GOOGLE_MEET: "Google Meet",
@@ -21,8 +23,11 @@ const PROVIDER_LABELS: Record<MeetingProvider, string> = {
   OTHER: "Other",
 };
 
-type ContactOption = { name: string; email: string | null };
+type ContactOption = { name: string; email: string | null; phone?: string | null };
 type Parent = { leadId?: string; clientId?: string };
+/** The signed-in user's own channels (from My account). */
+type Me = { whatsapp: string | null; meetingLink: string | null; whatsappLinked?: boolean };
+type Connected = { google: boolean; microsoft: boolean; firmMailbox?: boolean };
 
 function nextSlot() {
   const d = new Date();
@@ -32,7 +37,115 @@ function nextSlot() {
   return d.toISOString().slice(0, 16);
 }
 
-export function MeetingList({ meetings, showRelated = false }: { meetings: MeetingRow[]; showRelated?: boolean }) {
+const firstName = (s: string | null | undefined) => (s ?? "").trim().split(" ")[0];
+
+/**
+ * Share the meeting details the way the user works: WhatsApp (opens their own
+ * WhatsApp with the message prefilled — sent from their number), email from
+ * their connected mailbox, or copy to paste anywhere.
+ */
+export function ShareActions({ m, firmName, layout = "row", whatsappLinked = false }: { m: MeetingRow; firmName: string; layout?: "row" | "stack"; whatsappLinked?: boolean }) {
+  const router = useRouter();
+  const [email, setEmail] = useState<{ busy: boolean; result: string | null; error: string | null }>({ busy: false, result: null, error: null });
+  const [wa, setWa] = useState<{ busy: string | null; result: string | null; error: string | null }>({ busy: null, result: null, error: null });
+  const [copied, setCopied] = useState(false);
+  const text = meetingShareText(m, firmName);
+  const withPhone = m.attendees.filter((a) => a.phone);
+  const withEmail = m.attendees.filter((a) => a.email);
+
+  async function openWhatsApp(a?: { phone: string | null; name: string | null }) {
+    if (whatsappLinked && a?.phone) {
+      // Linked WhatsApp: the CRM sends it from the user's own number.
+      setWa({ busy: a.phone, result: null, error: null });
+      try {
+        const r = await api<{ direct: boolean; queued?: boolean; to?: string }>(`/api/meetings/${m.id}/share`, "POST", { channel: "whatsapp", phone: a.phone, name: a.name });
+        if (r.direct) {
+          setWa({ busy: null, result: r.queued ? `Queued on the firm's WhatsApp for ${firstName(a.name) || r.to}.` : `Sent to ${firstName(a.name) || r.to} on WhatsApp.`, error: null });
+          router.refresh();
+          return;
+        }
+      } catch (err) {
+        setWa({ busy: null, result: null, error: (err as Error).message });
+        return;
+      }
+      setWa({ busy: null, result: null, error: null });
+    }
+    window.open(whatsappUrl(text, a?.phone), "_blank", "noopener");
+    // Record on the timeline that the details went out on WhatsApp.
+    void api(`/api/meetings/${m.id}/share`, "POST", { channel: "whatsapp", phone: a?.phone ?? null, name: a?.name ?? null }).catch(() => undefined);
+  }
+  async function emailInvite() {
+    setEmail({ busy: true, result: null, error: null });
+    try {
+      const r = await api<{ sentTo: string[]; from: string }>(`/api/meetings/${m.id}/share`, "POST", { channel: "email" });
+      setEmail({ busy: false, result: `Emailed to ${r.sentTo.join(", ")} from ${r.from}.`, error: null });
+      router.refresh(); // the sent email now sits on the record's timeline
+    } catch (err) {
+      setEmail({ busy: false, result: null, error: (err as Error).message });
+    }
+  }
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* clipboard unavailable */
+    }
+  }
+
+  return (
+    <div className={clsx(layout === "stack" ? "flex flex-col items-stretch gap-1.5" : "flex flex-wrap items-center gap-1.5")} data-testid="share-actions">
+      {withPhone.length > 0 ? (
+        withPhone.map((a) => (
+          <Button key={a.phone} size="sm" variant="secondary" onClick={() => openWhatsApp(a)} loading={wa.busy === a.phone} title={whatsappLinked ? `Sends to ${formatWhatsApp(a.phone)} from your linked WhatsApp` : `Opens WhatsApp to ${formatWhatsApp(a.phone)}`} data-testid="share-whatsapp">
+            <MessageCircle size={13} className="text-emerald-600" /> WhatsApp {firstName(a.name) || formatWhatsApp(a.phone)}
+          </Button>
+        ))
+      ) : (
+        <Button size="sm" variant="secondary" onClick={() => openWhatsApp()} title="Opens WhatsApp; pick the contact there" data-testid="share-whatsapp">
+          <MessageCircle size={13} className="text-emerald-600" /> WhatsApp…
+        </Button>
+      )}
+      <Button
+        size="sm"
+        variant="secondary"
+        onClick={emailInvite}
+        loading={email.busy}
+        disabled={withEmail.length === 0}
+        title={withEmail.length ? `Email ${withEmail.map((a) => a.email).join(", ")} from the firm mailbox as you` : "No attendee has an email address"}
+        data-testid="share-email"
+      >
+        <Mail size={13} /> Email invite
+      </Button>
+      <Button size="sm" variant="ghost" onClick={copy} data-testid="share-copy">
+        {copied ? <Check size={13} /> : <Copy size={13} />} {copied ? "Copied" : "Copy details"}
+      </Button>
+      {email.result && (
+        <p className="w-full text-xs text-emerald-700" data-testid="share-result">
+          {email.result}
+        </p>
+      )}
+      {wa.result && (
+        <p className="w-full text-xs text-emerald-700" data-testid="share-whatsapp-result">
+          {wa.result}
+        </p>
+      )}
+      {wa.error && (
+        <p className="w-full text-xs text-red-600" data-testid="share-whatsapp-error">
+          {wa.error}
+        </p>
+      )}
+      {email.error && (
+        <p className="w-full text-xs text-red-600" data-testid="share-error">
+          {email.error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+export function MeetingList({ meetings, showRelated = false, firmName, whatsappLinked = false }: { meetings: MeetingRow[]; showRelated?: boolean; firmName: string; whatsappLinked?: boolean }) {
   const router = useRouter();
   const [closing, setClosing] = useState<{ m: MeetingRow; action: "complete" | "cancel" } | null>(null);
   if (meetings.length === 0) return <EmptyState title="No meetings" />;
@@ -63,16 +176,28 @@ export function MeetingList({ meetings, showRelated = false }: { meetings: Meeti
                       </Link>
                     )}
                   </p>
-                  {m.attendees.length > 0 && <p className="mt-0.5 truncate text-xs text-gray-500">With {m.attendees.map((a) => a.name || a.email).join(", ")}</p>}
+                  {m.attendees.length > 0 && <p className="mt-0.5 truncate text-xs text-gray-500">With {m.attendees.map((a) => a.name || a.email || formatWhatsApp(a.phone)).join(", ")}</p>}
                   {m.outcome && <p className="mt-1 whitespace-pre-wrap rounded bg-gray-50 px-2 py-1 text-xs text-gray-700">{m.outcome}</p>}
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-1">
                   {m.status === "SCHEDULED" ? (
-                    m.joinUrl ? (
-                      <a href={m.joinUrl} target="_blank" rel="noreferrer" className="rounded-md bg-brand-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-brand-700" data-testid="join-link">
-                        Join
-                      </a>
-                    ) : null
+                    <div className="flex items-center gap-1">
+                      {m.canManage && (
+                        <details className="relative">
+                          <summary className="flex h-7 cursor-pointer list-none items-center gap-1 rounded-md px-2 text-xs font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900" data-testid="share-menu">
+                            <Share2 size={12} /> Share
+                          </summary>
+                          <div className="absolute right-0 z-10 mt-1 w-64 rounded-lg border border-gray-200 bg-white p-2 shadow-lg">
+                            <ShareActions m={m} firmName={firmName} layout="stack" whatsappLinked={whatsappLinked} />
+                          </div>
+                        </details>
+                      )}
+                      {m.joinUrl && (
+                        <a href={m.joinUrl} target="_blank" rel="noreferrer" className="rounded-md bg-brand-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-brand-700" data-testid="join-link">
+                          Join
+                        </a>
+                      )}
+                    </div>
                   ) : (
                     <Badge tone={m.status === "COMPLETED" ? "green" : "gray"}>{m.status === "COMPLETED" ? "Completed" : "Cancelled"}</Badge>
                   )}
@@ -142,24 +267,32 @@ function CloseMeetingModal({ m, action, onClose, onDone }: { m: MeetingRow; acti
   );
 }
 
+const contactKey = (c: ContactOption) => c.email ?? c.phone ?? c.name;
+
 function ScheduleModal({
   parent,
   contacts,
   mandates,
   connected,
+  me,
+  firmName,
   onClose,
 }: {
   parent: Parent;
   contacts: ContactOption[];
   mandates: { id: string; code: string; title: string }[];
-  connected: { google: boolean; microsoft: boolean };
+  connected: Connected;
+  me: Me;
+  firmName: string;
   onClose: () => void;
 }) {
   const router = useRouter();
   const [provider, setProvider] = useState<MeetingProvider>(connected.google ? "GOOGLE_MEET" : connected.microsoft ? "TEAMS" : "ZOOM");
-  const [selected, setSelected] = useState<Set<string>>(new Set(contacts.filter((c) => c.email).slice(0, 1).map((c) => c.email!)));
+  const reachable = contacts.filter((c) => c.email || c.phone);
+  const [selected, setSelected] = useState<Set<string>>(new Set(reachable.slice(0, 1).map(contactKey)));
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [created, setCreated] = useState<MeetingRow | null>(null);
   const autoLink = (provider === "GOOGLE_MEET" && connected.google) || (provider === "TEAMS" && connected.microsoft);
   const needsLink = provider === "ZOOM" || provider === "OTHER" || ((provider === "GOOGLE_MEET" || provider === "TEAMS") && !autoLink);
 
@@ -173,11 +306,11 @@ function ScheduleModal({
       .map((s) => s.trim())
       .filter(Boolean);
     const attendees = [
-      ...contacts.filter((c) => c.email && selected.has(c.email)).map((c) => ({ email: c.email!, name: c.name })),
-      ...extra.map((email) => ({ email })),
+      ...reachable.filter((c) => selected.has(contactKey(c))).map((c) => ({ email: c.email, name: c.name, phone: c.phone ?? null })),
+      ...extra.map((email) => ({ email, name: null, phone: null })),
     ];
     try {
-      await api("/api/meetings", "POST", {
+      const { meeting } = await api<{ meeting: MeetingRow }>("/api/meetings", "POST", {
         ...parent,
         title: f.get("title"),
         agenda: f.get("agenda"),
@@ -190,12 +323,49 @@ function ScheduleModal({
         mandateId: f.get("mandateId") ?? "",
         addToCalendar: f.get("addToCalendar") === "on",
       });
-      onClose();
       router.refresh();
+      setCreated(meeting);
     } catch (err) {
       setError((err as Error).message);
+    } finally {
       setLoading(false);
     }
+  }
+
+  if (created) {
+    return (
+      <Modal open onClose={onClose} title="Meeting scheduled" description="Send the details from your own accounts, or copy them." footer={<Button onClick={onClose}>Done</Button>}>
+        <div className="space-y-4" data-testid="meeting-scheduled">
+          <div className="rounded-lg bg-gray-50 px-3 py-2 text-sm">
+            <p className="font-medium text-gray-900">{created.title}</p>
+            <p className="text-xs text-gray-600">{meetingWhen(created)}</p>
+            {created.joinUrl && (
+              <a href={created.joinUrl} target="_blank" rel="noreferrer" className="break-all text-xs text-brand-600 hover:underline">
+                {created.joinUrl}
+              </a>
+            )}
+            {created.inCalendar && (
+              <p className="mt-1 inline-flex items-center gap-1 text-xs text-emerald-700">
+                <CalendarCheck size={11} /> Calendar invite emailed to attendees with an email address.
+              </p>
+            )}
+            {!created.inCalendar && !connected.google && !connected.microsoft && !connected.firmMailbox && (
+              <p className="mt-1 text-xs text-gray-500">Calendar invitations are emailed automatically once an administrator sets up the firm mailbox under Settings → System email.</p>
+            )}
+          </div>
+          <ShareActions m={created} firmName={firmName} layout="stack" whatsappLinked={!!me.whatsappLinked} />
+          {!me.whatsapp && (
+            <p className="text-xs text-gray-500">
+              Tip: add your WhatsApp number under{" "}
+              <Link href="/account" className="font-medium text-brand-600 hover:underline">
+                My account
+              </Link>{" "}
+              so it appears in your signature.
+            </p>
+          )}
+        </div>
+      </Modal>
+    );
   }
 
   return (
@@ -243,7 +413,9 @@ function ScheduleModal({
                 ? `A ${provider === "TEAMS" ? "Teams" : "Meet"} link is created in your calendar and invites are emailed to attendees.`
                 : provider === "GOOGLE_MEET" || provider === "TEAMS"
                   ? `Connect your ${provider === "TEAMS" ? "Microsoft" : "Google"} account under My account to create links automatically, or paste one below.`
-                  : undefined
+                  : needsLink && me.meetingLink
+                    ? "Prefilled with your personal meeting link from My account."
+                    : undefined
             }
           >
             <Select id="mt-provider" value={provider} onChange={(e) => setProvider(e.target.value as MeetingProvider)} options={Object.entries(PROVIDER_LABELS).map(([value, label]) => ({ value, label }))} />
@@ -252,7 +424,7 @@ function ScheduleModal({
         {needsLink && (
           <div className="col-span-6">
             <Field label="Meeting link" htmlFor="mt-link">
-              <Input id="mt-link" name="joinUrl" type="url" placeholder="https://…" required={provider === "ZOOM"} />
+              <Input id="mt-link" name="joinUrl" type="url" placeholder="https://…" defaultValue={me.meetingLink ?? ""} required={provider === "ZOOM"} />
             </Field>
           </div>
         )}
@@ -266,29 +438,35 @@ function ScheduleModal({
         <div className="col-span-6">
           <p className="mb-1.5 text-xs font-medium text-gray-700">Attendees</p>
           <div className="space-y-1">
-            {contacts.filter((c) => c.email).length === 0 && <p className="text-xs text-gray-500">No contacts with an email yet — add emails below.</p>}
-            {contacts
-              .filter((c) => c.email)
-              .map((c) => (
-                <label key={c.email} className="flex items-center gap-2 text-sm text-gray-700">
+            {reachable.length === 0 && <p className="text-xs text-gray-500">No contacts with an email or phone yet — add emails below.</p>}
+            {reachable.map((c) => {
+              const key = contactKey(c);
+              return (
+                <label key={key} className="flex items-center gap-2 text-sm text-gray-700">
                   <input
                     type="checkbox"
                     className="rounded border-gray-300"
-                    checked={selected.has(c.email!)}
+                    checked={selected.has(key)}
                     onChange={(e) =>
                       setSelected((s) => {
                         const n = new Set(s);
-                        if (e.target.checked) n.add(c.email!);
-                        else n.delete(c.email!);
+                        if (e.target.checked) n.add(key);
+                        else n.delete(key);
                         return n;
                       })
                     }
                   />
-                  {c.name} <span className="text-xs text-gray-400">{c.email}</span>
+                  {c.name}{" "}
+                  <span className="text-xs text-gray-400">
+                    {c.email ?? "no email"}
+                    {c.phone ? ` · WhatsApp ${formatWhatsApp(c.phone)}` : ""}
+                  </span>
                 </label>
-              ))}
+              );
+            })}
           </div>
           <Input name="extra" aria-label="Other attendee emails" placeholder="Other emails (comma separated), e.g. your colleague" className="mt-2" />
+          <p className="mt-1 text-xs text-gray-500">Attendees with an email get the calendar invite; after scheduling you can also send the details on WhatsApp or from your mailbox.</p>
         </div>
         {mandates.length > 0 && (
           <div className="col-span-6">
@@ -302,9 +480,10 @@ function ScheduleModal({
             <Textarea id="mt-agenda" name="agenda" rows={2} />
           </Field>
         </div>
-        {(connected.google || connected.microsoft) && (
+        {(connected.google || connected.microsoft || connected.firmMailbox) && (
           <label className="col-span-6 flex items-center gap-2 text-sm text-gray-700">
-            <input type="checkbox" name="addToCalendar" defaultChecked className="rounded border-gray-300" /> Add to my calendar and email invites
+            <input type="checkbox" name="addToCalendar" defaultChecked className="rounded border-gray-300" />{" "}
+            {connected.google || connected.microsoft ? "Add to my calendar and email invites" : "Email invitations from the firm mailbox as me (calendar file attached)"}
           </label>
         )}
       </form>
@@ -318,13 +497,17 @@ export function MeetingsCard({
   contacts,
   mandates = [],
   connected,
+  me = { whatsapp: null, meetingLink: null },
+  firmName,
   canSchedule,
 }: {
   parent: Parent;
   meetings: MeetingRow[];
   contacts: ContactOption[];
   mandates?: { id: string; code: string; title: string }[];
-  connected: { google: boolean; microsoft: boolean };
+  connected: Connected;
+  me?: Me;
+  firmName: string;
   canSchedule: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -342,14 +525,14 @@ export function MeetingsCard({
         )
       }
     >
-      {upcoming.length > 0 ? <MeetingList meetings={upcoming} /> : <EmptyState title="No upcoming meetings" />}
+      {upcoming.length > 0 ? <MeetingList meetings={upcoming} firmName={firmName} whatsappLinked={!!me.whatsappLinked} /> : <EmptyState title="No upcoming meetings" />}
       {past.length > 0 && (
         <details className="border-t border-gray-100">
           <summary className="cursor-pointer px-5 py-2.5 text-xs font-medium text-gray-500 hover:text-gray-800">Past & cancelled ({past.length})</summary>
-          <MeetingList meetings={past} />
+          <MeetingList meetings={past} firmName={firmName} whatsappLinked={!!me.whatsappLinked} />
         </details>
       )}
-      {open && <ScheduleModal parent={parent} contacts={contacts} mandates={mandates} connected={connected} onClose={() => setOpen(false)} />}
+      {open && <ScheduleModal parent={parent} contacts={contacts} mandates={mandates} connected={connected} me={me} firmName={firmName} onClose={() => setOpen(false)} />}
     </Card>
   );
 }
